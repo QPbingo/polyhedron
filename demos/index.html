@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN" data-palette="electric">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>多面体 · 你的 Agent，随处继续</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='12' fill='%233879ec'/%3E%3Cpath d='m20 8 11 6v12l-11 6-11-6V14zm0 0v12m-11-6 11 6 11-6m-11 6v12' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="palettes.css">
+  <script src="palettes.js"></script>
+  <script src="model.js" defer></script><script src="app.js" defer></script>
+</head>
+<body>
+  <!-- HTML visual proposal. Reference: uupm.cc/demo/telemedicine. No real account, CLI, or device connection. -->
+  <a class="skip-link" href="#workspace">跳到会话工作区</a>
+  <svg class="svg-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+    <symbol id="i-cube" viewBox="0 0 24 24"><path d="m12 2 9 5v10l-9 5-9-5V7zm0 0v10M3 7l9 5 9-5m-9 5v10"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m5 7 5 5-5 5m8 0h6"/></symbol>
+    <symbol id="i-computer" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><rect x="8" y="4" width="4" height="6" rx="1"/><rect x="14" y="14" width="4" height="6" rx="1"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 8V5h7l2 3h9v12H3z"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-11v2"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 2 8 3v6c0 5-8 11-8 11S4 16 4 11V5z"/><path d="m8 11 3 3 5-5"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 5v15m0-15C9 3 5 3 2 4v15c3-1 7-1 10 1 3-2 7-2 10-1V4c-3-1-7-1-10 1z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M5 8a8 8 0 0 1 13-3l2 3M4 16l2 3a8 8 0 0 0 13-3"/></symbol>
+    <symbol id="i-signal" viewBox="0 0 24 24"><path d="M4 16v4m5-8v8m6-12v12m5-17v17"/></symbol>
+  </defs></svg>
+
+  <main class="page" id="workspace" tabindex="-1">
+    <div class="workbench-layout" id="workbench-layout">
+      <aside class="sidebar" aria-label="会话与设备">
+        <div class="sidebar-top">
+          <label class="session-search"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><input id="session-search" type="search" placeholder="搜索项目或会话" aria-label="搜索会话或项目"><kbd>⌘ K</kbd></label>
+          <nav class="sidebar-functions" aria-label="会话功能">
+            <button class="sidebar-function" data-filter="all" aria-pressed="true"><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg>全部会话<span id="session-count" class="function-count">4</span></button>
+            <button class="sidebar-function" data-filter="pending" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg>待处理<span id="pending-count" class="function-count">1</span></button>
+            <button class="sidebar-function" data-filter="done" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>已结束</button>
+          </nav>
+        </div>
+        <section class="projects-section" aria-labelledby="projects-heading">
+          <div class="projects-heading"><h2 id="projects-heading">Projects <span id="project-count">3</span></h2><button class="icon-button" data-action="project" aria-label="添加项目" title="添加项目"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button></div>
+          <nav class="project-list" id="session-list" aria-label="项目与会话"></nav>
+        </section>
+        <div class="sidebar-bottom"><button class="sidebar-action" data-action="settings"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>设置</button><button class="sidebar-action" data-action="help"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg>使用指南</button></div>
+      </aside>
+
+      <section class="workspace-card" aria-label="当前会话工作区">
+        <div class="work-area" id="work-area">
+          <section class="terminal-frame" aria-label="终端视觉演示">
+            <header class="terminal-toolbar"><div class="terminal-tab"><svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg><strong id="terminal-agent">Codex</strong></div><div class="terminal-tools"><button class="icon-button" id="toggle-details" aria-label="会话详情" aria-expanded="false" aria-controls="details" title="会话详情"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg></button><button class="icon-button" id="copy-terminal" aria-label="复制终端演示内容" title="复制内容"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg></button><button class="icon-button" id="toggle-focus" aria-label="进入专注模式" aria-pressed="false" title="专注模式"><svg class="icon" aria-hidden="true"><use href="#i-expand"/></svg></button></div></header>
+            <div class="terminal-screen" id="terminal-screen" tabindex="0" aria-label="终端输出，全部为演示数据"><div id="terminal-output"></div><div id="extra-output"></div></div>
+            <form id="terminal-form" class="terminal-input"><span class="prompt-symbol" aria-hidden="true">›</span><textarea id="terminal-command" rows="1" aria-label="终端演示输入" placeholder="在会话详情中接管后输入…" disabled></textarea><button type="submit" class="input-submit" aria-label="发送演示输入" disabled><svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button></form>
+            <footer class="terminal-footer"><span id="input-hint">只读 · 在会话详情中接管</span><span class="terminal-demo-label">演示 · 不执行命令</span></footer>
+          </section>
+
+          <section id="details" class="details" aria-label="会话详情" hidden><div><h3>会话信息</h3><dl class="facts"><div><dt>主机</dt><dd id="detail-execution-host">工作室 Mac mini</dd></div><div><dt>连接</dt><dd class="host-connection"><span class="connection-dot"></span><span id="connection-label">已连接</span></dd></div><div><dt>操作权</dt><dd id="detail-control">办公室 MacBook</dd></div><div><dt>Agent</dt><dd id="detail-agent">Codex CLI</dd></div><div><dt>项目</dt><dd id="detail-project">polyhedron-web</dd></div><div><dt>创建时间</dt><dd>今天 14:32 · 示例</dd></div><div><dt>会话 ID</dt><dd id="detail-session">login</dd></div></dl><div class="detail-actions"><button class="text-button" id="acquire-control">接管控制</button><button class="interrupt" id="interrupt" disabled><svg class="icon" aria-hidden="true"><use href="#i-stop"/></svg>中断任务</button></div></div><div><h3>最近动态</h3><ol class="timeline" id="timeline"></ol></div></section>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <dialog id="project-dialog" aria-labelledby="project-title"><form id="project-form">
+    <div class="dialog-header"><h2 id="project-title">添加项目</h2><button type="button" class="icon-button" data-close="project-dialog" aria-label="关闭添加项目"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <p class="dialog-description">一个项目对应一个固定目录，会话归属在项目下。</p>
+    <label class="field-label" for="project-name-input">项目名称</label><input class="form-control" id="project-name-input" name="name" required maxlength="48" placeholder="例如：my-app" autocomplete="off">
+    <label class="field-label spaced-label" for="project-path-input">项目目录</label><input class="form-control" id="project-path-input" name="path" required placeholder="~/Projects/my-app" autocomplete="off" aria-describedby="project-error">
+    <label class="field-label spaced-label" for="project-host-input">执行主机</label><select class="form-control" id="project-host-input" name="host"><option>工作室 Mac mini</option><option>家里的 MacBook</option></select>
+    <p class="form-error" id="project-error" role="alert"></p><div class="dialog-actions"><button class="secondary" type="button" data-close="project-dialog">取消</button><button class="primary" type="submit">添加项目</button></div><p class="dialog-disclaimer">仅添加演示目录，不会读取本机文件。</p>
+  </form></dialog>
+
+  <dialog id="new-dialog" aria-labelledby="new-title"><form id="new-form"><div class="dialog-header"><span class="dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></span><button type="button" class="icon-button" data-close="new-dialog" aria-label="关闭新建会话"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div><h2 id="new-title">新建会话</h2><p class="dialog-description">会话将在此项目目录中开始。</p><label class="field-label" for="new-name">会话名称 <span>必填</span></label><input class="form-control" name="title" id="new-name" required maxlength="48" placeholder="例如：优化搜索体验" autocomplete="off" aria-describedby="form-error"><fieldset><legend>选择 Agent</legend><label class="agent-option"><input type="radio" name="agent" value="Codex" checked><span class="agent-option-glyph">C</span><span><strong>Codex</strong><small>Codex CLI</small></span></label><label class="agent-option"><input type="radio" name="agent" value="Claude Code"><span class="agent-option-glyph claude">CC</span><span><strong>Claude Code</strong><small>Claude Code CLI</small></span></label></fieldset><div class="new-session-project"><p class="field-label">所属项目</p><strong id="new-project-name"></strong><p class="project-directory" id="new-project-path"></p></div><div class="form-host"><svg class="icon" aria-hidden="true"><use href="#i-computer"/></svg><span id="new-session-host">工作室 Mac mini</span><span class="online-label" id="new-session-availability">在线 · 演示</span></div><p class="form-error" id="form-error" role="alert"></p><div class="dialog-actions"><button class="secondary" type="button" data-close="new-dialog">取消</button><button class="primary" type="submit">创建会话<svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button></div><p class="dialog-disclaimer">仅创建演示会话，不会启动真实 Agent。</p></form></dialog>
+
+  <dialog id="settings-dialog" aria-labelledby="settings-title">
+    <div class="dialog-header"><h2 id="settings-title">设置</h2><button class="icon-button" data-close="settings-dialog" aria-label="关闭设置"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <section class="settings-section" aria-labelledby="appearance-title"><div class="settings-heading"><h3 id="appearance-title">配色</h3><span id="palette-current" class="palette-current" aria-live="polite">电光蓝</span></div><div class="palette-options" id="palette-options" role="group" aria-label="选择工作台配色"></div></section>
+    <div class="settings-font"><label for="font-size">终端字号</label><input id="font-size" type="range" min="12" max="20" value="14"><output id="font-size-output">14px</output></div>
+    <section class="settings-section" aria-labelledby="devices-title"><h3 id="devices-title">设备</h3><div class="device-row"><span class="device-icon"><svg class="icon" aria-hidden="true"><use href="#i-computer"/></svg></span><div><strong>工作室 Mac mini</strong><small>执行主机 · Apple Silicon</small></div><span class="online-label">在线</span></div><div class="device-row"><span class="device-icon"><svg class="icon" aria-hidden="true"><use href="#i-computer"/></svg></span><div><strong>家里的 MacBook</strong><small>执行主机 · Apple Silicon</small></div><span class="muted">离线</span></div></section>
+    <details class="demo-tools"><summary>演示连接</summary><p>当前会话主机：<span id="detail-host">工作室 Mac mini</span></p><button class="text-button" id="simulate-network"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg><span>模拟断线重连</span></button></details>
+    <p class="settings-note">所有设备和会话均为演示数据，尚未连接真实 Agent。</p>
+  </dialog>
+
+  <dialog id="help-dialog" aria-labelledby="help-title"><div class="dialog-header"><span class="dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg></span><button class="icon-button" data-close="help-dialog" aria-label="关闭使用指南"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div><h2 id="help-title">换台电脑，接着做。</h2><p class="dialog-description">三个步骤，体验多面体的会话操作。</p><ol class="help-steps"><li><span>1</span><div><strong>找到你的会话</strong><p>展开左侧 Projects 中的项目，再选择它下面的会话。项目旁的 + 会在该目录中新建会话。</p></div></li><li><span>2</span><div><strong>需要时接管控制</strong><p>输入框为只读时，打开终端右上角的“会话详情”，点击“接管控制”。一次只有一个设备可以输入。</p></div></li><li><span>3</span><div><strong>像终端一样输入</strong><p>输入后按 Enter。审批也留在终端中；切换到权限检查会话，输入 1 或 2 试试。</p></div></li></ol><p class="settings-note">这是样式与交互 Demo。真实跨设备连接、CLI 和断线恢复尚未接入。</p><button class="primary full-width" data-close="help-dialog">明白了，开始体验<svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

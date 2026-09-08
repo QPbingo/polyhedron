@@ -1,0 +1,44 @@
+{
+  "name": "polyhedron-backend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "relay": "node --import tsx src/relay/main.ts",
+    "host": "node --import tsx src/host/main.ts",
+    "connector": "node --import tsx src/connector/main.ts",
+    "dev": "node --import tsx src/dev.ts",
+    "diagnose": "node --import tsx src/adapters/diagnose.ts",
+    "postinstall": "node scripts/prepare-native.mjs",
+    "pair": "node --import tsx src/connector/pair.ts",
+    "host:stop": "node scripts/stop-host.mjs"
+  },
+  "dependencies": {
+    "fastify": "^5.6.0",
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/websocket": "^11.2.0",
+    "@fastify/cors": "^11.1.0",
+    "@fastify/rate-limit": "^10.3.0",
+    "@xterm/headless": "5.5.0",
+    "@xterm/addon-serialize": "0.13.0",
+    "node-pty": "^1.1.0",
+    "ws": "^8.18.3",
+    "jose": "^6.1.0",
+    "openid-client": "^6.8.1",
+    "pg": "^8.16.3",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "tsx": "^4.20.5",
+    "@types/node": "^22.18.0",
+    "@types/ws": "^8.18.1",
+    "@types/pg": "^8.15.5"
+  }
+}

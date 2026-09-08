@@ -1,0 +1,41 @@
+services:
+  database:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: polyhedron
+      POSTGRES_DB: polyhedron
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your private environment}
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U polyhedron]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+  relay:
+    build: ./backend
+    environment:
+      NODE_ENV: production
+      DEV_AUTH: "0"
+      BIND_HOST: 0.0.0.0
+      PORT: "3001"
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set your HTTPS public origin}
+      DATABASE_URL: postgresql://polyhedron:${POSTGRES_PASSWORD}@database:5432/polyhedron
+      RELAY_SESSION_SECRET: ${RELAY_SESSION_SECRET:?Set a random secret of at least 32 characters}
+      OIDC_ISSUER: ${OIDC_ISSUER:?Set OIDC issuer}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?Set OIDC client ID}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+    depends_on:
+      database:
+        condition: service_healthy
+    restart: unless-stopped
+  frontend:
+    build: ./frontend
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      - relay
+    restart: unless-stopped
+volumes:
+  database:

@@ -1,0 +1,30 @@
+{
+  "name": "polyhedron-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 18417 --strictPort",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 18417 --strictPort",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "node --experimental-strip-types --test test/*.test.ts",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "@xterm/xterm": "5.5.0",
+    "@xterm/addon-fit": "0.10.0",
+    "@xterm/addon-search": "0.15.0",
+    "@xterm/addon-webgl": "0.18.0"
+  },
+  "devDependencies": {
+    "vite": "^7.1.4",
+    "typescript": "^5.9.2",
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.2",
+    "@playwright/test": "^1.55.0"
+  }
+}

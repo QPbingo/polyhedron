@@ -1,0 +1,137 @@
+/* Five brighter proposals and the original reference palette.
+   The same tokens paint each swatch and the live workbench. */
+.palette-option {
+  --bg: #f5f8fd;
+  --accent: #2d68d6;
+  --accent-soft: #edf4ff;
+  --brand-blue: #4f8cff;
+  --brand-secondary: #20b8bd;
+  --terminal: #152238;
+}
+:root[data-palette="electric"], .palette-option[data-palette="electric"] {
+  --bg: #f1f6ff;
+  --glow: #dceaff;
+  --accent: #2455e6;
+  --accent-hover: #1643c7;
+  --accent-end: #1565d8;
+  --accent-soft: #e9f0ff;
+  --brand-blue: #3265ff;
+  --brand-secondary: #16d4e0;
+  --secondary-soft: #dffbfc;
+  --heading-start: #2455e6;
+  --heading-end: #007a8c;
+  --terminal: #101e3d;
+  --terminal-bar: #182949;
+  --terminal-line: #344767;
+  --terminal-blue: #a5c7ff;
+}
+:root[data-palette="iris"], .palette-option[data-palette="iris"] {
+  --bg: #f7f3ff;
+  --glow: #eaddff;
+  --accent: #7434dc;
+  --accent-hover: #5f25c1;
+  --accent-end: #9633b7;
+  --accent-soft: #f1e9ff;
+  --brand-blue: #8b4aff;
+  --brand-secondary: #ffab8f;
+  --secondary-soft: #fff0e7;
+  --heading-start: #7434dc;
+  --heading-end: #b63173;
+  --terminal: #261b3b;
+  --terminal-bar: #302447;
+  --terminal-line: #4d3b64;
+  --terminal-blue: #d2b5ff;
+}
+:root[data-palette="coral"], .palette-option[data-palette="coral"] {
+  --bg: #fff6f0;
+  --glow: #ffe2d4;
+  --accent: #c04018;
+  --accent-hover: #a83515;
+  --accent-end: #c02e62;
+  --accent-soft: #fff0e5;
+  --brand-blue: #ff703d;
+  --brand-secondary: #fb508c;
+  --secondary-soft: #ffeaf1;
+  --heading-start: #c4441b;
+  --heading-end: #bc2c61;
+  --terminal: #302023;
+  --terminal-bar: #3b2a2e;
+  --terminal-line: #594247;
+  --terminal-blue: #ffc3a7;
+}
+:root[data-palette="emerald"], .palette-option[data-palette="emerald"] {
+  --bg: #f0faf5;
+  --glow: #d8f8e7;
+  --accent: #087b58;
+  --accent-hover: #046345;
+  --accent-end: #08766d;
+  --accent-soft: #e1f6e9;
+  --brand-blue: #00b881;
+  --brand-secondary: #bce849;
+  --secondary-soft: #f0fad5;
+  --heading-start: #087b58;
+  --heading-end: #596f09;
+  --terminal: #132e28;
+  --terminal-bar: #1d3932;
+  --terminal-line: #3a574e;
+  --terminal-blue: #b9e984;
+}
+:root[data-palette="rose"], .palette-option[data-palette="rose"] {
+  --bg: #fff3f8;
+  --glow: #ffdeee;
+  --accent: #c82672;
+  --accent-hover: #aa1e5f;
+  --accent-end: #a631a9;
+  --accent-soft: #ffe9f3;
+  --brand-blue: #f34296;
+  --brand-secondary: #48bfff;
+  --secondary-soft: #e5f5ff;
+  --heading-start: #c82672;
+  --heading-end: #306dcc;
+  --terminal: #2c1b30;
+  --terminal-bar: #37263d;
+  --terminal-line: #563e5c;
+  --terminal-blue: #ffb7dc;
+}
+:root:not([data-palette="original"]) {
+  --muted: #536176;
+  --accent-line: color-mix(in srgb, var(--brand-blue) 25%, white);
+  --accent-tint: color-mix(in srgb, var(--brand-blue) 16%, white);
+  --control-bg: var(--accent-soft);
+  --control-line: var(--accent-line);
+  --control-icon: var(--accent-tint);
+  --terminal-prompt: color-mix(in srgb, var(--terminal) 92%, white);
+  --terminal-input: color-mix(in srgb, var(--terminal) 96%, white);
+  --terminal-submit: color-mix(in srgb, var(--terminal) 80%, var(--brand-blue));
+  --shadow: 0 5px 24px color-mix(in srgb, var(--accent) 6%, transparent);
+}
+:root:not([data-palette="original"]) .terminal-emblem { border-color: var(--terminal-line); }
+:root:not([data-palette="original"]) .terminal-input { border-color: color-mix(in srgb, var(--terminal) 65%, white); }
+:root:not([data-palette="original"]) .terminal-input:focus-within { border-color: var(--terminal-blue); box-shadow: 0 0 0 1px var(--terminal-blue); }
+:root:not([data-palette="original"]) .terminal-frame :focus-visible { outline-color: var(--terminal-blue); }
+:root:not([data-palette="original"]) .terminal-tools .icon-button:hover,
+:root:not([data-palette="original"]) .input-submit:hover { background: var(--terminal-line); }
+:root:not([data-palette="original"]) ::selection { background: var(--accent-tint); color: var(--text); }
+
+/* Palette choices live in Settings; the workbench stays focused on the session. */
+.palette-current { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--accent); }
+.palette-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 2px 0; }
+.palette-option { position: relative; min-width: 0; padding: 10px; border: 1px solid #e1e5ed; border-radius: 10px; text-align: left; background: white; color: #243047; }
+.palette-option:hover { border-color: var(--accent); background: var(--bg); }
+.palette-option[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft);  }
+.palette-option[aria-pressed="true"]::after { content: ""; width: 7px; height: 4px; border-left: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); position: absolute; right: 10px; top: 35px; color: var(--accent); font-size: 13px; font-weight: 700; }
+.palette-option:focus-visible { outline-color: var(--accent); }
+.palette-swatches { display: flex; width: 100%; height: 11px; gap: 3px; margin-bottom: 10px; }
+.palette-swatches i { flex: 1; border-radius: 3px; }
+.palette-swatches i:nth-child(1) { background: var(--brand-blue); flex: 2; }
+.palette-swatches i:nth-child(2) { background: var(--brand-secondary); }
+.palette-swatches i:nth-child(3) { background: var(--bg); box-shadow: inset 0 0 0 1px #0000000a; }
+.palette-swatches i:nth-child(4) { background: var(--terminal); }
+.palette-option strong { display: block; padding-right: 15px; font-size: 13px; line-height: 1.6; font-weight: 600; }
+.palette-option small { display: block; font-size: 11px; line-height: 1.7; margin-top: 3px; color: #596579; }
+@media (max-width: 1100px) {
+  .palette-options { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .palette-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
