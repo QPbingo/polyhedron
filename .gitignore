@@ -7,6 +7,7 @@ node_modules/
 !**/.env.example
 *.tsbuildinfo
 .impeccable/
+.superpowers/
 **/test-results/
 **/playwright-report/
 .DS_Store
