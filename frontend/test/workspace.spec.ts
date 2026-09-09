@@ -11,6 +11,19 @@ async function setup(page:Page){
  await page.goto('/');await page.getByRole('button',{name:/真实终端测试/}).click();await expect(page.getByRole('status').filter({hasText:'只读'})).toBeVisible();
  return {calls,screen(data:string){socket.send(JSON.stringify({type:'event',event:'snapshot',hostId:'h1',sessionId:'s1',clientId,session:state,seq:2,data,cols:90,rows:30}))},query(){const meta=Buffer.from(JSON.stringify({type:'event',event:'output',hostId:'h1',sessionId:'s1',clientId,runtimeEpoch:'runtime-1',seq:3}));const size=Buffer.alloc(4);size.writeUInt32BE(meta.length);socket.send(Buffer.concat([size,meta,Buffer.from('\x1b[6n\x1b[c\x1b[>c\x1b]52;c;dGVzdA==\x07QUERY_END')]))},broadcastSnapshot(){socket.send(JSON.stringify({type:'event',event:'snapshot',hostId:'h1',sessionId:'s1',clientId,session:state,seq:2,data:'RESIZED_SNAPSHOT\r\n',cols:72,rows:24}))},resync(){socket.send(JSON.stringify({type:'event',event:'resync',hostId:'h1',sessionId:'s1',clientId}))},revoke(){state={...state,controller:'another-client' as any,controlEpoch:state.controlEpoch+1};socket.send(JSON.stringify({type:'event',event:'state',session:state}))},disconnect(){socket.close()}};
 }
+async function setupEmptyWorkspace(page:Page){
+ await page.route('**/api/auth',route=>route.fulfill({json:{authenticated:true,user:{id:'u1',name:'测试用户'},csrfToken:'csrf-test',mode:'development'}}));
+ await page.route('**/api/state',route=>route.fulfill({json:{hosts:[host],projects:[],sessions:[]}}));
+ await page.routeWebSocket('**/ws/browser?*',socket=>socket.onMessage(raw=>{const request=JSON.parse(String(raw));socket.send(JSON.stringify({type:'response',id:request.id,result:{ok:true}}))}));
+ await page.goto('/');
+}
+async function setupOfflineWorkspace(page:Page){
+ await page.route('**/api/auth',route=>route.fulfill({json:{authenticated:true,user:{id:'u1',name:'测试用户'},csrfToken:'csrf-test',mode:'development'}}));
+ await page.route('**/api/browsers',route=>route.fulfill({json:{browsers:[]}}));
+ await page.route('**/api/state',route=>route.fulfill({json:{hosts:[{...host,online:false}],projects:[],sessions:[]}}));
+ await page.routeWebSocket('**/ws/browser?*',socket=>socket.onMessage(raw=>{const request=JSON.parse(String(raw));socket.send(JSON.stringify({type:'response',id:request.id,result:{ok:true}}))}));
+ await page.goto('/');
+}
 test('snapshot output queue renders in order; input stays blocked until claim and resize, then revocation blocks it',async({page})=>{
  const {calls,revoke}=await setup(page);
  await expect.poll(()=>calls.filter(x=>x.method==='outputAck').map(x=>x.params.seq)).toContain(2);
@@ -35,8 +48,36 @@ test('disconnect suspends input and reconnect requires a fresh snapshot and expl
 });
 
 test('authoritative resize snapshots preserve readonly viewing and resync reattaches without claiming',async({page})=>{
- const {calls,broadcastSnapshot,resync}=await setup(page);broadcastSnapshot();await page.getByRole('button',{name:'搜索终端',exact:true}).click();await page.getByRole('textbox',{name:'在终端中查找'}).fill('RESIZED_SNAPSHOT');await page.getByRole('button',{name:'下一个',exact:true}).click();await expect(page.locator('.toast')).toHaveCount(0);
+ const {calls,broadcastSnapshot,resync}=await setup(page);broadcastSnapshot();await page.getByRole('button',{name:'搜索终端',exact:true}).click();await page.getByRole('searchbox',{name:'在终端中查找'}).fill('RESIZED_SNAPSHOT');await page.getByRole('button',{name:'下一个',exact:true}).click();await expect(page.locator('.toast')).toHaveCount(0);
  expect(calls.filter(x=>x.method==='resize')).toHaveLength(0);expect(calls.filter(x=>x.method==='claimControl')).toHaveLength(0);resync();await expect.poll(()=>calls.filter(x=>x.method==='attach').length).toBe(2);await expect(page.getByRole('status').filter({hasText:'只读'})).toBeVisible();
+});
+test('keyboard project search has a visible focus indicator',async({page})=>{
+ await setup(page);await page.keyboard.press('Control+k');await expect(page.getByRole('searchbox',{name:'搜索会话或项目'})).toBeFocused();await expect(page.locator('.session-search')).toHaveCSS('border-color','rgb(141, 173, 255)');
+});
+test('terminal search has a visible focus indicator',async({page})=>{
+ await setup(page);await page.getByRole('button',{name:'搜索终端',exact:true}).click();await expect(page.getByRole('searchbox',{name:'在终端中查找'})).toBeFocused();await expect(page.locator('.terminal-search')).toHaveCSS('border-color','rgb(154, 186, 255)');
+});
+test('the application keeps one stable page heading',async({page})=>{
+ await setupEmptyWorkspace(page);await expect(page.getByRole('heading',{name:'多面体',level:1,exact:true})).toHaveCount(1);await expect(page.getByRole('heading',{level:1})).toHaveCount(1);
+ await page.setViewportSize({width:390,height:844});await expect(page.getByRole('heading',{name:'多面体',level:1,exact:true})).toHaveCount(1);
+});
+test('mobile header keeps the product identity visible',async({page})=>{
+ await setupEmptyWorkspace(page);await page.setViewportSize({width:390,height:844});const heading=page.getByRole('heading',{name:'多面体',level:1,exact:true});await expect(heading).toBeVisible();expect((await heading.boundingBox())!.width).toBeGreaterThan(30);
+});
+test('the skip link moves keyboard focus to the terminal workspace',async({page})=>{
+ await setup(page);const skip=page.getByRole('link',{name:'跳到会话工作区',exact:true});await skip.focus();await page.keyboard.press('Enter');await expect(page.locator('#terminal-workspace')).toBeFocused();
+});
+test('mobile icon controls keep usable touch targets',async({page})=>{
+ await setup(page);await page.setViewportSize({width:390,height:844});const add=await page.getByRole('button',{name:'添加项目',exact:true}).boundingBox(),search=await page.getByRole('button',{name:'搜索终端',exact:true}).boundingBox();
+ expect(add!.width).toBeGreaterThanOrEqual(36);expect(add!.height).toBeGreaterThanOrEqual(36);expect(search!.width).toBeGreaterThanOrEqual(36);expect(search!.height).toBeGreaterThanOrEqual(36);await expect(page.getByRole('button',{name:'搜索终端',exact:true})).toHaveCSS('touch-action','manipulation');
+});
+test('online host without projects offers a usable first-project action',async({page})=>{
+ await setupEmptyWorkspace(page);await expect(page.getByText('点击左侧 Projects 旁的“添加项目”，创建第一个项目。',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'添加第一个项目',exact:true}).click();await expect(page.getByRole('dialog',{name:'添加项目'})).toBeVisible();
+});
+test('offline host state remains visually muted and settings contain their own scroll',async({page})=>{
+ await setupOfflineWorkspace(page);await page.getByRole('button',{name:'设置',exact:true}).click();const dialog=page.getByRole('dialog',{name:'设置'});
+ await expect(dialog).toHaveCSS('overscroll-behavior-y','contain');await expect(dialog.getByText('离线',{exact:true})).toHaveCSS('color','rgb(141, 154, 177)');
 });
 test('liquid glass shell keeps navigation beside the terminal and details float above it',async({page},testInfo)=>{
  const browserErrors:string[]=[];page.on('pageerror',error=>browserErrors.push(error.message));page.on('console',message=>{if(message.type()==='error')browserErrors.push(message.text())});

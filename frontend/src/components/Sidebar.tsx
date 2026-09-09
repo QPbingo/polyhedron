@@ -37,7 +37,7 @@ export function Sidebar({hosts,projects,sessions,loaded,connection,filter,query,
  const filters:[SessionFilter,string,string][]=[['all','全部会话',String(sessions.filter(session=>!session.archived).length)],['pending','待处理',String(sessions.filter(session=>!session.archived&&isPending(session)).length)],['done','已结束','']];
  return <aside className="sidebar" aria-label="会话与设备">
   <div className="sidebar-top">
-   <label className="session-search glass-control"><Icon name="search"/><input ref={searchInput} type="search" value={query} onChange={event=>onQueryChange(event.target.value)} placeholder="搜索项目或会话" aria-label="搜索会话或项目"/><kbd>⌘ K</kbd></label>
+   <label className="session-search glass-control"><Icon name="search"/><input ref={searchInput} type="search" value={query} onChange={event=>onQueryChange(event.target.value)} placeholder="搜索项目或会话…" aria-label="搜索会话或项目" spellCheck={false}/><kbd>⌘ K</kbd></label>
    <nav className="session-filters glass-control" aria-label="会话功能">{filters.map(([id,label,count])=><button key={id} className="sidebar-function" aria-label={count?`${label} ${count}`:label} aria-pressed={filter===id} onClick={()=>onFilterChange(id)}>{label}{count&&<span className="function-count">{count}</span>}</button>)}</nav>
   </div>
   <section className="projects-section" aria-labelledby="projects-heading">

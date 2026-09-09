@@ -39,8 +39,8 @@ export function ProjectForm({hosts,rpc,busy,online,onSubmit}:{hosts:Host[];rpc:R
    <p className="dialog-description">选择执行主机上的项目文件夹。</p>
    <label className="field-label field-block">执行主机<select name="host" className="form-control" required value={hostId} disabled={busy} onChange={e=>{setHostId(e.target.value);setPath('')}}><option value="" disabled>选择在线主机</option>{hosts.map(h=><option key={h.id} value={h.id} disabled={!h.online}>{h.name}{h.online?'':' · 离线'}</option>)}</select></label>
    <label className="field-label field-block" htmlFor="project-path">项目目录</label>
-   <div className="folder-field"><input id="project-path" className="form-control" name="path" value={path} onChange={e=>setPath(e.target.value)} placeholder="选择文件夹或输入完整路径" required maxLength={4096} autoComplete="off" disabled={busy}/><button type="button" className="folder-browse" aria-label="选择文件夹" title="选择文件夹" disabled={busy||!available} onClick={()=>setPicking(true)}><FolderIcon/></button></div>
-   <label className="field-label field-block">项目名称<input className="form-control" name="name" value={name} onChange={e=>setName(e.target.value)} placeholder="选择文件夹后自动填写，可修改" required maxLength={48} autoComplete="off" disabled={busy}/></label>
+   <div className="folder-field"><input id="project-path" className="form-control" name="path" value={path} onChange={e=>setPath(e.target.value)} placeholder="选择文件夹或输入完整路径…" required maxLength={4096} autoComplete="off" spellCheck={false} disabled={busy}/><button type="button" className="folder-browse" aria-label="选择文件夹" title="选择文件夹" disabled={busy||!available} onClick={()=>setPicking(true)}><FolderIcon/></button></div>
+   <label className="field-label field-block">项目名称<input className="form-control" name="name" value={name} onChange={e=>setName(e.target.value)} placeholder="选择文件夹后自动填写，可修改…" required maxLength={48} autoComplete="off" disabled={busy}/></label>
    <p className="settings-note">目录必须已存在，并位于此主机配置的授权根目录内。</p>
    <button className="primary full-width" disabled={busy||!available}>添加项目</button>
   </form>

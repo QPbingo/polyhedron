@@ -11,5 +11,6 @@ export function Modal({title,eyebrow,children,onClose}:{title:string;eyebrow?:st
 }
 
 export function Field({label,name,initial='',placeholder,required=true}:{label:string;name:string;initial?:string;placeholder?:string;required?:boolean}){
- return <label className="field-label field-block">{label}<input className="form-control" name={name} defaultValue={initial} placeholder={placeholder} required={required} maxLength={name==='path'?4096:120} autoComplete="off"/></label>;
+ const hint=placeholder&&!placeholder.endsWith('…')?`${placeholder}…`:placeholder;
+ return <label className="field-label field-block">{label}<input className="form-control" name={name} defaultValue={initial} placeholder={hint} required={required} maxLength={name==='path'?4096:120} autoComplete="off" spellCheck={name==='code'?false:undefined}/></label>;
 }
