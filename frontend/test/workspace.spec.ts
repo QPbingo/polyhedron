@@ -26,7 +26,7 @@ test('six palettes, project scoped creation, unavailable agent and read-only his
  const {calls}=await setup(page);await page.getByRole('button',{name:'设置',exact:true}).click();
  for(const name of ['电光蓝','鸢尾紫','珊瑚橙','翡翠绿','玫瑰粉','原版蓝青']){const button=page.getByRole('button',{name:new RegExp(name)});await button.click();await expect(button).toHaveAttribute('aria-pressed','true')}
  await page.getByLabel('终端字号').fill('18');await expect(page.getByText('18px',{exact:true})).toBeVisible();await page.getByRole('button',{name:'关闭对话框'}).click();
- await page.getByRole('button',{name:'example 项目操作'}).focus();await page.getByRole('button',{name:'example 项目操作'}).click();await page.getByRole('menuitem',{name:'新建会话',exact:true}).click();await expect(page.getByRole('dialog')).toContainText('/Users/test/Projects/example');await expect(page.getByRole('radio',{name:/Claude Code/})).toBeDisabled();await page.getByRole('button',{name:'关闭对话框'}).click();
+ await page.locator('.project-group').filter({hasText:'example'}).hover();await page.getByRole('button',{name:'在 example 中新建会话',exact:true}).click();await expect(page.getByRole('dialog')).toContainText('/Users/test/Projects/example');await expect(page.getByRole('radio',{name:/Claude Code/})).toBeDisabled();await page.getByRole('button',{name:'关闭对话框'}).click();
  await page.getByRole('button',{name:'会话详情',exact:true}).click();await page.getByRole('button',{name:'历史记录',exact:true}).click();await expect(page.locator('.history-output')).toHaveText('HISTORY_ONLY');await page.getByLabel('选择历史运行').selectOption('runtime-old');await expect(page.locator('.history-output')).toHaveText('PREVIOUS_RUN');expect(calls.filter(x=>x.method==='input')).toHaveLength(0);
  await page.getByRole('button',{name:'关闭对话框'}).click();await page.getByRole('button',{name:'进入专注模式'}).click();await expect(page.getByRole('complementary')).toBeHidden();await page.keyboard.press('Control+k');await expect(page.getByRole('searchbox',{name:'搜索会话或项目'})).toBeFocused();
 });
@@ -38,11 +38,19 @@ test('authoritative resize snapshots preserve readonly viewing and resync reatta
  const {calls,broadcastSnapshot,resync}=await setup(page);broadcastSnapshot();await page.getByRole('button',{name:'搜索终端',exact:true}).click();await page.getByRole('textbox',{name:'在终端中查找'}).fill('RESIZED_SNAPSHOT');await page.getByRole('button',{name:'下一个',exact:true}).click();await expect(page.locator('.toast')).toHaveCount(0);
  expect(calls.filter(x=>x.method==='resize')).toHaveLength(0);expect(calls.filter(x=>x.method==='claimControl')).toHaveLength(0);resync();await expect.poll(()=>calls.filter(x=>x.method==='attach').length).toBe(2);await expect(page.getByRole('status').filter({hasText:'只读'})).toBeVisible();
 });
-test('desktop workspace stays edge to edge and dialogs stay usable at narrow widths',async({page},testInfo)=>{
- await setup(page);await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollHeight<=innerHeight)).toBe(true);
- const box=await page.locator('.workspace-card').boundingBox();expect(box?.x).toBe(248);expect(box?.y).toBe(0);expect(box?.height).toBe(800);
- await page.screenshot({path:testInfo.outputPath('desktop.png'),fullPage:true});await page.getByRole('button',{name:'设置',exact:true}).click();await page.screenshot({path:testInfo.outputPath('settings.png'),fullPage:true});
- await page.setViewportSize({width:390,height:844});await expect(page.getByRole('dialog')).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);
+test('liquid glass shell keeps navigation beside the terminal and details float above it',async({page},testInfo)=>{
+ const browserErrors:string[]=[];page.on('pageerror',error=>browserErrors.push(error.message));page.on('console',message=>{if(message.type()==='error')browserErrors.push(message.text())});
+ await setup(page);await expect(page.locator('.shell-header')).toBeVisible();await expect(page.locator('#command-form')).toHaveCount(0);await expect(page.locator('.xterm-helper-textarea')).toHaveCount(1);await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollHeight<=innerHeight)).toBe(true);
+ const sidebar=await page.locator('.sidebar').boundingBox(),workspace=await page.locator('.workspace-card').boundingBox();
+ expect(Math.abs(sidebar!.y-workspace!.y)).toBeLessThan(2);expect(workspace!.x).toBeGreaterThan(sidebar!.x+sidebar!.width-1);
+ const width=workspace!.width;await page.getByRole('button',{name:'会话详情',exact:true}).click();await expect(page.locator('.session-details-sheet')).toBeVisible();
+ expect((await page.locator('.workspace-card').boundingBox())?.width).toBe(width);await page.screenshot({path:testInfo.outputPath('desktop.png'),fullPage:true});
+ await page.setViewportSize({width:736,height:863});const compactSidebar=await page.locator('.sidebar').boundingBox(),compactWorkspace=await page.locator('.workspace-card').boundingBox();
+ expect(Math.abs(compactSidebar!.y-compactWorkspace!.y)).toBeLessThan(2);expect(compactWorkspace!.x).toBeGreaterThan(compactSidebar!.x+compactSidebar!.width-1);
+ await page.getByRole('button',{name:'设置',exact:true}).click();await page.screenshot({path:testInfo.outputPath('settings.png'),fullPage:true});
+ await page.getByRole('button',{name:'关闭对话框'}).click();await page.setViewportSize({width:580,height:844});const thresholdSidebar=await page.locator('.sidebar').boundingBox(),thresholdWorkspace=await page.locator('.workspace-card').boundingBox();expect(thresholdWorkspace!.x).toBeGreaterThan(thresholdSidebar!.x+thresholdSidebar!.width-1);
+ await page.getByRole('button',{name:'设置',exact:true}).click();
+ await page.setViewportSize({width:390,height:844});await expect(page.getByRole('dialog')).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);expect(browserErrors).toEqual([]);
 });
 
 test('display queries never become controller input and OSC52 cannot write the clipboard',async({page})=>{
@@ -92,13 +100,13 @@ test('folder picker browses directories, preserves cancellation and submits the 
  await expect.poll(()=>calls.find(c=>c.method==='addProject')?.params).toEqual({name:'自定义项目',path:'/Users/test/Projects/我的应用'});
 });
 
-test('project header hides paths and reveals one combined action menu on hover or focus',async({page},testInfo)=>{
- await setup(page);const heading=page.locator('.project-heading').first(),trigger=page.getByRole('button',{name:'example 项目操作'});
- await page.getByRole('button',{name:'全部会话 1',exact:true}).focus();await page.mouse.move(600,100);
- await expect(heading.locator('.project-label small')).toHaveCount(0);await expect(trigger).toHaveCSS('opacity','0');
- await heading.hover();await expect(trigger).toHaveCSS('opacity','1');await trigger.click();await expect(page.getByRole('menuitem',{name:'新建会话',exact:true})).toBeFocused();await page.screenshot({path:testInfo.outputPath('project-actions.png')});
- await page.keyboard.press('ArrowDown');await expect(page.getByRole('menuitem',{name:'项目设置',exact:true})).toBeFocused();await page.keyboard.press('Enter');await expect(page.getByRole('dialog',{name:'项目设置'})).toBeVisible();await page.getByRole('button',{name:'关闭对话框'}).click();
- await trigger.focus();await trigger.click();await page.keyboard.press('Escape');await expect(page.getByRole('menu')).toHaveCount(0);await expect(trigger).toBeFocused();
+test('project header exposes scoped create and settings controls on hover or focus',async({page},testInfo)=>{
+ await setup(page);const group=page.locator('.project-group').filter({hasText:'example'}),actions=group.locator('.project-actions');
+ const create=group.getByRole('button',{name:'在 example 中新建会话',exact:true}),settings=group.getByRole('button',{name:'example 项目设置',exact:true});
+ await page.getByRole('button',{name:'全部会话 1',exact:true}).focus();await page.mouse.move(600,100);await expect(actions).toHaveCSS('opacity','0');
+ await group.hover();await expect(actions).toHaveCSS('opacity','1');await create.click();await expect(page.getByRole('dialog',{name:'新建会话'})).toContainText('/Users/test/Projects/example');await page.getByRole('button',{name:'关闭对话框'}).click();
+ await settings.focus();await expect(actions).toHaveCSS('opacity','1');await settings.click();await expect(page.getByRole('dialog',{name:'项目设置'})).toBeVisible();
+ await page.screenshot({path:testInfo.outputPath('project-actions.png')});
 });
 test('native user prompt backgrounds follow terminal repaint without modifying output or forwarding input',async({page},testInfo)=>{
  const {screen,calls}=await setup(page);
