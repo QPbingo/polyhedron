@@ -84,15 +84,15 @@ test('a resume rejected by the process limit leaves the previous exited session 
   } finally {await m.close();rmSync(dir,{recursive:true,force:true});}
 });
 
-test('history reports truncation when retention has removed every segment',async()=>{
+test('history remains available when the legacy quota is smaller than the journal',async()=>{
   const {dir,config}=setup();
   const {HostStore}=await import('../src/host/store.js');
   const store=new HostStore(config.dataDir!,1,30);
   try {
     store.append({id:'history-session',runtimeEpoch:'old-runtime'} as any,1,'older terminal output');
     const history=store.history('history-session','old-runtime');
-    assert.deepEqual(history.entries,[]);
-    assert.equal(history.truncated,true);
+    assert.equal(history.entries[0].data,'older terminal output');
+    assert.equal(history.truncated,false);
   } finally {store.close();rmSync(dir,{recursive:true,force:true});}
 });
 
