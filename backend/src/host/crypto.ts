@@ -1,6 +1,7 @@
 import {createCipheriv,createDecipheriv,createHash,createHmac,hkdfSync,randomBytes,timingSafeEqual} from 'node:crypto';
 
 function stable(value:unknown):string{
+  if(value===undefined)return 'null';
   if(value===null||typeof value!=='object')return JSON.stringify(value);
   if(Array.isArray(value))return `[${value.map(stable).join(',')}]`;
   const source=value as Record<string,unknown>;

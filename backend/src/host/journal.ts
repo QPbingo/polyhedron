@@ -8,8 +8,8 @@ export interface StoredJournalEvent{streamId:string;offset:number;kind:string;op
 export interface OperationRecord{status:'requested'|'applied'|'failed'|'indeterminate';requestOffset:number;resultOffset:number|null;result?:unknown;error?:{code:string;message:string}}
 export interface OperationHandle{streamId:string;operationId:string;actor:string;kind:string;payloadDigest:string;requestOffset:number}
 type BeginInput={streamId:string;operationId:string;actor:string;kind:string;payload:unknown;runtimeOffset?:number;at?:string};
-type CompleteInput={kind:string;result?:unknown;error?:{code:string;message:string};payload?:unknown;runtimeOffset?:number;status?:'applied'|'failed'|'indeterminate';at?:string;mutate?:(db:DatabaseSync)=>void};
-type FactInput={streamId:string;kind:string;payload:unknown;runtimeOffset?:number;operationId?:string;actor?:string;at?:string;mutate?:(db:DatabaseSync)=>void};
+type CompleteInput={kind:string;result?:unknown;resultFactory?:(event:StoredJournalEvent)=>unknown;error?:{code:string;message:string};payload?:unknown;runtimeOffset?:number;status?:'applied'|'failed'|'indeterminate';at?:string;mutate?:(db:DatabaseSync,event:StoredJournalEvent)=>void};
+type FactInput={streamId:string;kind:string;payload:unknown;runtimeOffset?:number;operationId?:string;actor?:string;at?:string;mutate?:(db:DatabaseSync,event:StoredJournalEvent)=>void};
 
 export class HostJournal{
   constructor(readonly db:DatabaseSync,readonly cipher:LocalCipher,private faults?:JournalFaults){this.schema();this.verify();this.recover()}
@@ -29,13 +29,13 @@ export class HostJournal{
   }
   private appendWithin(input:FactInput):StoredJournalEvent{
     const key=this.key(input.streamId),head=this.db.prepare('SELECT head_offset,head_hash FROM journal_streams WHERE stream_id=?').get(input.streamId) as any;
-    const offset=Number(head.head_offset)+1,at=input.at??new Date().toISOString(),runtimeOffset=input.runtimeOffset??0,payloadDigest=this.cipher.digest(stableJson(input.payload));
+    const offset=Number(head.head_offset)+1,at=input.at??new Date().toISOString(),runtimeOffset=input.runtimeOffset??(input.kind==='runtime_started'?offset:0),payloadDigest=this.cipher.digest(stableJson(input.payload));
     const payloadCipher=this.cipher.sealJson(input.payload,key,`event:${input.streamId}:${offset}:${input.kind}`),prevHash=String(head.head_hash??'');
     const signed=stableJson({streamId:input.streamId,offset,kind:input.kind,operationId:input.operationId??null,actor:input.actor??null,at,runtimeOffset,payloadDigest,prevHash,payloadCipher});
     const eventHash=this.cipher.eventHash(key,signed);
     this.db.prepare('INSERT INTO journal_events(stream_id,offset,kind,operation_id,actor,at,runtime_offset,payload_cipher,payload_digest,prev_hash,event_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(input.streamId,offset,input.kind,input.operationId??null,input.actor??null,at,runtimeOffset,payloadCipher,payloadDigest,prevHash,eventHash);
     this.db.prepare('UPDATE journal_streams SET head_offset=?,head_hash=? WHERE stream_id=?').run(offset,eventHash,input.streamId);
-    input.mutate?.(this.db);return {streamId:input.streamId,offset,kind:input.kind,operationId:input.operationId??null,actor:input.actor??null,at,runtimeOffset,payload:input.payload};
+    const event={streamId:input.streamId,offset,kind:input.kind,operationId:input.operationId??null,actor:input.actor??null,at,runtimeOffset,payload:input.payload};input.mutate?.(this.db,event);return event;
   }
   begin(input:BeginInput):{handle?:OperationHandle;duplicate?:OperationRecord}{
     if(!input.operationId||input.operationId.length>200)throw new Fault('INVALID_OPERATION','Operation ID is invalid');
@@ -48,7 +48,7 @@ export class HostJournal{
   }
   complete(handle:OperationHandle,input:CompleteInput):StoredJournalEvent{
     this.faults?.hit('result.beforeCommit');
-    const event=this.transaction(()=>{const current=this.db.prepare('SELECT status FROM journal_operations WHERE stream_id=? AND actor=? AND operation_id=?').get(handle.streamId,handle.actor,handle.operationId) as any;if(!current||current.status!=='requested')throw new Fault('OPERATION_STATE','Operation is not pending');const status=input.status??(input.error?'failed':'applied');const payload=input.payload??(input.error?{error:input.error}:{result:input.result});const event=this.appendWithin({streamId:handle.streamId,kind:input.kind,operationId:handle.operationId,actor:handle.actor,runtimeOffset:input.runtimeOffset,payload,at:input.at,mutate:input.mutate});const key=this.key(handle.streamId),resultCipher=input.result===undefined?null:this.cipher.sealJson(input.result,key,`operation:${handle.streamId}:${handle.actor}:${handle.operationId}`);this.db.prepare('UPDATE journal_operations SET status=?,result_offset=?,result_cipher=?,error_code=?,error_message=? WHERE stream_id=? AND actor=? AND operation_id=?').run(status,event.offset,resultCipher,input.error?.code??null,input.error?.message??null,handle.streamId,handle.actor,handle.operationId);return event});
+    const event=this.transaction(()=>{const current=this.db.prepare('SELECT status FROM journal_operations WHERE stream_id=? AND actor=? AND operation_id=?').get(handle.streamId,handle.actor,handle.operationId) as any;if(!current||current.status!=='requested')throw new Fault('OPERATION_STATE','Operation is not pending');const status=input.status??(input.error?'failed':'applied');const payload=input.payload??(input.error?{error:input.error}:{result:input.result});const event=this.appendWithin({streamId:handle.streamId,kind:input.kind,operationId:handle.operationId,actor:handle.actor,runtimeOffset:input.runtimeOffset,payload,at:input.at,mutate:input.mutate});const result=input.resultFactory?input.resultFactory(event):input.result;const key=this.key(handle.streamId),resultCipher=result===undefined?null:this.cipher.sealJson(result,key,`operation:${handle.streamId}:${handle.actor}:${handle.operationId}`);this.db.prepare('UPDATE journal_operations SET status=?,result_offset=?,result_cipher=?,error_code=?,error_message=? WHERE stream_id=? AND actor=? AND operation_id=?').run(status,event.offset,resultCipher,input.error?.code??null,input.error?.message??null,handle.streamId,handle.actor,handle.operationId);return event});
     this.faults?.hit('result.afterCommit');return event;
   }
   appendFact(input:FactInput){this.faults?.hit('fact.beforeCommit');const event=this.transaction(()=>this.appendWithin(input));this.faults?.hit('fact.afterCommit');return event}

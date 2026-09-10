@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { buildLaunch, detectAgents } from '../src/adapters/index.js';
 
 const nativeId = 'c55d669d-c03e-4f67-8900-5518ce7b585d';
-const base = { cwd: '/tmp/project', sessionId: 'our-session', runtimeEpoch: 'epoch', hookToken: 'secret-hook-token', hookSocket: '/tmp/host.sock', dataDir: '/tmp/data' };
+const base = { cwd: '/tmp/project', sessionId: 'our-session', runtimeToken: 'runtime-token', hookToken: 'secret-hook-token', hookSocket: '/tmp/host.sock', dataDir: '/tmp/data' };
 // Fake only the installed vendor executable: these tests must never make a paid model call.
 async function fakeCli(name: string, version: string, fn: () => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), 'poly-adapter-'));
@@ -26,6 +26,7 @@ test('codex resumes only the exact captured UUID and injects hooks without crede
     assert.equal(launch.args.includes('--last'), false);
     assert.equal(launch.args.some(a => /bypass|yolo|secret-hook-token/.test(a)), false);
     assert.equal(launch.env.POLY_HOOK_TOKEN, 'secret-hook-token');
+    assert.equal(launch.env.POLY_RUNTIME_TOKEN, 'runtime-token');
     assert.ok(launch.args.some(a => a.startsWith('hooks.SessionStart=')));
     assert.ok(launch.args.some(a => a.startsWith('hooks.PermissionRequest=')));
   });

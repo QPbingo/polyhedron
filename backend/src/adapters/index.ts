@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 export type Agent = 'codex' | 'claude';
 export type AgentInfo = { id: Agent; name: string; path: string | null; version: string | null; available: boolean; reason?: string; hooks?: boolean };
-export type LaunchOptions = { agent: Agent; cwd: string; nativeSessionId?: string | null; sessionId: string; runtimeEpoch: string; hookToken: string; hookSocket: string; dataDir: string };
+export type LaunchOptions = { agent: Agent; cwd: string; nativeSessionId?: string | null; sessionId: string; runtimeToken: string; hookToken: string; hookSocket: string; dataDir: string };
 const exec = promisify(execFile);
 const bridgePath = fileURLToPath(new URL('../../scripts/hook-bridge.mjs', import.meta.url));
 const events = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PermissionRequest', 'PostToolUse', 'Stop', 'SessionEnd'] as const;
@@ -44,7 +44,7 @@ export async function buildLaunch(options: LaunchOptions): Promise<{ file: strin
   if (!['codex', 'claude'].includes(options.agent)) throw new Error('Unsupported agent');
   if (options.nativeSessionId !== undefined && options.nativeSessionId !== null && !uuid.test(options.nativeSessionId)) throw new Error('Native session ID must be an exact captured UUID');
   if (!isAbsolute(options.cwd) || !isAbsolute(options.hookSocket) || !isAbsolute(options.dataDir)) throw new Error('Launch paths must be absolute');
-  if (![options.sessionId, options.runtimeEpoch, options.hookToken].every(s => s && !/[\x00-\x1f]/.test(s))) throw new Error('Invalid runtime hook context');
+  if (![options.sessionId, options.runtimeToken, options.hookToken].every(s => s && !/[\x00-\x1f]/.test(s))) throw new Error('Invalid runtime hook context');
   const info = await detect(options.agent);
   if (!info.available || !info.path) throw new Error(info.reason ?? 'CLI unavailable');
   await access(bridgePath, constants.R_OK);
@@ -59,5 +59,5 @@ export async function buildLaunch(options: LaunchOptions): Promise<{ file: strin
     const hooks = Object.fromEntries([...events, 'PostToolUseFailure'].map(event => [event, [{ hooks: [{ type: 'command', command, timeout: 2 }] }]]));
     args.push('--settings', JSON.stringify({ hooks }));
   }
-  return { file: info.path, args, env: { POLY_SESSION_ID: options.sessionId, POLY_RUNTIME_EPOCH: options.runtimeEpoch, POLY_HOOK_TOKEN: options.hookToken, POLY_HOOK_SOCKET: options.hookSocket } };
+  return { file: info.path, args, env: { POLY_SESSION_ID: options.sessionId, POLY_RUNTIME_TOKEN: options.runtimeToken, POLY_HOOK_TOKEN: options.hookToken, POLY_HOOK_SOCKET: options.hookSocket } };
 }

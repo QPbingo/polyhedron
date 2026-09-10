@@ -28,6 +28,7 @@ export class TerminalState {
   this.pending=text.slice(safe);if(this.pending.length>128*1024){this.pending='';throw Error('终端控制序列超过缓冲限制，需要重新连接');}
   const complete=text.slice(0,safe);if(complete)await new Promise<void>(resolve=>this.term.write(complete,resolve));return complete;
  }
- snapshot(){return this.serializer.serialize({scrollback:3000});}
+  snapshot(){return this.serializer.serialize({scrollback:3000});}
+  checkpointReady(){return this.pending.length===0}
  close(){this.term.dispose();}
 }

@@ -1,7 +1,7 @@
 import {DatabaseSync} from 'node:sqlite';
 import {mkdirSync,chmodSync,readFileSync,existsSync} from 'node:fs';
 import {join} from 'node:path';
-import {Fault,type Project,type Session,type Snapshot} from '../shared/types.js';
+import {Fault,type Project,type Session,type Snapshot,type SessionSnapshot} from '../shared/types.js';
 import {LocalCipher} from './crypto.js';
 import {HostJournal,type JournalFaults} from './journal.js';
 
@@ -50,7 +50,10 @@ export class HostStore{
   saveSession(session:Session){this.db.prepare('INSERT INTO sessions VALUES (?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(session.id,this.encode(session,`sessions:${session.id}`))}
   saveSnapshot(snapshot:Snapshot){this.db.prepare('INSERT INTO snapshots VALUES (?,?,?) ON CONFLICT(session_id,runtime) DO UPDATE SET data=excluded.data').run(snapshot.session.id,snapshot.session.runtimeEpoch,this.encode(snapshot,`snapshot:${snapshot.session.id}:${snapshot.session.runtimeEpoch}`))}
   snapshot(id:string,runtime:string):Snapshot|null{const row=this.db.prepare('SELECT data FROM snapshots WHERE session_id=? AND runtime=?').get(id,runtime) as any;if(!row)return null;try{return this.decode<Snapshot>(row.data,`snapshot:${id}:${runtime}`)}catch{throw new Fault('SNAPSHOT_CORRUPT','保存的终端快照已损坏，可查看历史记录或恢复原生会话')}}
+  saveOffsetSnapshot(snapshot:SessionSnapshot){const runtime=String(snapshot.session.runtimeOffset??0);this.db.prepare('INSERT INTO snapshots VALUES (?,?,?) ON CONFLICT(session_id,runtime) DO UPDATE SET data=excluded.data').run(snapshot.session.id,runtime,this.encode(snapshot,`snapshot:${snapshot.session.id}:${runtime}`))}
+  offsetSnapshot(id:string,runtimeOffset:number):SessionSnapshot|null{const runtime=String(runtimeOffset),row=this.db.prepare('SELECT data FROM snapshots WHERE session_id=? AND runtime=?').get(id,runtime) as any;if(!row)return null;try{return this.decode<SessionSnapshot>(row.data,`snapshot:${id}:${runtime}`)}catch{throw new Fault('SNAPSHOT_CORRUPT','保存的终端快照已损坏，可从 journal 重新构建')}}
   recordHook(id:string,session:Session,event:string,at:string,nativeId=session.nativeSessionId){const encoded=nativeId?this.encode(nativeId,`hook:${id}`):null;const result=this.db.prepare('INSERT OR IGNORE INTO hooks VALUES (?,?,?,?,?,?)').run(id,session.id,session.runtimeEpoch,event,encoded,at);return result.changes>0}
+  hasHook(id:string){return !!this.db.prepare('SELECT 1 FROM hooks WHERE id=?').get(id)}
   append(session:Session,seq:number,data:string){const at=new Date().toISOString();return this.journal.appendFact({streamId:`session:${session.id}`,kind:'pty_output',runtimeOffset:session.runtimeOffset??1,at,payload:{seq,data,at,runtimeEpoch:session.runtimeEpoch}})}
   prune(){/* Journal history is permanent until an explicit user deletion. */}
   history(id:string,runtime:string,before=Number.MAX_SAFE_INTEGER,limit=100){

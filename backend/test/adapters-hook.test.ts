@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path';
 const bridge = resolve('scripts/hook-bridge.mjs');
 function run(input: string, socket: string, end = true) {
   return new Promise<{ code: number|null, stdout: string, stderr: string }>((resolve, reject) => {
-    const child = spawn(process.execPath, [bridge], { env: { ...process.env, POLY_HOOK_SOCKET: socket, POLY_HOOK_TOKEN: 'runtime-secret', POLY_SESSION_ID: 'session', POLY_RUNTIME_EPOCH: 'epoch' }, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [bridge], { env: { ...process.env, POLY_HOOK_SOCKET: socket, POLY_HOOK_TOKEN: 'runtime-secret', POLY_SESSION_ID: 'session', POLY_RUNTIME_TOKEN: 'runtime-token' }, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '', stderr = '';
     child.stdout.on('data', d => stdout += d); child.stderr.on('data', d => stderr += d); child.on('error', reject);
     child.on('close', code => resolve({ code, stdout, stderr })); child.stdin.on('error', () => {}); if (end) child.stdin.end(input); else child.stdin.write(input);
@@ -24,7 +24,7 @@ test('bridge authenticates Unix IPC and strips prompt, tool arguments, transcrip
     const result = await run(JSON.stringify({ hook_event_name: 'PreToolUse', session_id: 'native-id', event_id: 'event-123', agent_id: 'child-1', tool_use_id: 'tool-123', tool_name: 'Bash', prompt: 'TOP SECRET', tool_input: {command:'SECRET'}, tool_response:'SECRET', transcript_path:'/private/secret' }), socket);
     assert.equal(result.code, 0); assert.equal(result.stdout, ''); assert.equal(result.stderr, '');
     assert.equal(auth, 'Bearer runtime-secret'); assert.equal(url, '/hook');
-    assert.deepEqual(Object.keys(received).sort(), ['agentId','at','event','eventId','nativeSessionId','runtimeEpoch','sessionId','toolName','toolUseId'].sort());
+    assert.deepEqual(Object.keys(received).sort(), ['agentId','at','event','eventId','nativeSessionId','runtimeToken','sessionId','toolName','toolUseId'].sort());
     assert.equal(received.eventId, 'event-123'); assert.equal(received.agentId, 'child-1'); assert.equal(received.toolUseId, 'tool-123'); assert.equal(received.nativeSessionId, 'native-id'); assert.equal(received.toolName, 'Bash');
   } finally { await new Promise<void>(r => server.close(() => r())); await rm(dir, {recursive:true,force:true}); }
 });

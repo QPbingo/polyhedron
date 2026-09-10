@@ -11,8 +11,9 @@ import type {HostConfig} from '../src/shared/types.js';
 import type {LaunchOptions} from '../src/adapters/index.js';
 
 async function call(m:HostManager,c:HostConfig,method:string,params:Record<string,unknown>={}) {
-  const grant=await new SignJWT({hostId:c.hostId,clientId:'review',scope:'host',method,sessionId:params.sessionId,runtimeEpoch:params.runtimeEpoch}).setSubject(c.accountId).setIssuedAt().setExpirationTime('30s').setProtectedHeader({alg:'HS256'}).sign(new TextEncoder().encode(c.hostToken));
-  return m.rpc({type:'rpc',requestId:randomUUID(),clientId:'review',method,params,grant});
+  const body={operationId:randomUUID(),...params};
+  const grant=await new SignJWT({hostId:c.hostId,clientId:'review',scope:'host',method,sessionId:body.sessionId}).setSubject(c.accountId).setIssuedAt().setExpirationTime('30s').setProtectedHeader({alg:'HS256'}).sign(new TextEncoder().encode(c.hostToken));
+  return m.rpc({type:'rpc',requestId:randomUUID(),clientId:'review',channelId:'review-channel',method,params:body,grant});
 }
 function setup(){
   const dir=realpathSync(mkdtempSync(join(tmpdir(),'poly-host-review-'))),root=join(dir,'root');mkdirSync(root);
@@ -38,16 +39,16 @@ test('approval without tool ID only clears on matching tool name or authoritativ
   try {
     const p=await call(m,config,'addProject',{name:'Review',path:root});
     const s=await call(m,config,'createSession',{projectId:p.id,title:'Hook',agent:'codex'});
-    await m.hook(context!.hookToken,{sessionId:s.id,runtimeEpoch:s.runtimeEpoch,event:'PermissionRequest',eventId:'approval-without-tool-id',toolName:'Bash',at:new Date().toISOString()});
+    await m.hook(context!.hookToken,{sessionId:s.id,runtimeToken:context!.runtimeToken,event:'PermissionRequest',eventId:'approval-without-tool-id',toolName:'Bash',at:new Date().toISOString()});
     assert.equal((await call(m,config,'list')).sessions[0].activity,'approval');
-    await m.hook(context!.hookToken,{sessionId:s.id,runtimeEpoch:s.runtimeEpoch,event:'PostToolUse',eventId:'other-tool-finished',toolUseId:'tool-other',toolName:'Read',at:new Date().toISOString()});
+    await m.hook(context!.hookToken,{sessionId:s.id,runtimeToken:context!.runtimeToken,event:'PostToolUse',eventId:'other-tool-finished',toolUseId:'tool-other',toolName:'Read',at:new Date().toISOString()});
     assert.equal((await call(m,config,'list')).sessions[0].activity,'approval');
-    await m.hook(context!.hookToken,{sessionId:s.id,runtimeEpoch:s.runtimeEpoch,event:'PostToolUse',eventId:'approved-tool-finished',toolUseId:'tool-123',toolName:'Bash',at:new Date().toISOString()});
+    await m.hook(context!.hookToken,{sessionId:s.id,runtimeToken:context!.runtimeToken,event:'PostToolUse',eventId:'approved-tool-finished',toolUseId:'tool-123',toolName:'Bash',at:new Date().toISOString()});
     assert.equal((await call(m,config,'list')).sessions[0].activity,'working');
-    await m.hook(context!.hookToken,{sessionId:s.id,runtimeEpoch:s.runtimeEpoch,event:'PermissionRequest',eventId:'missing-correlations',at:new Date().toISOString()});
-    await m.hook(context!.hookToken,{sessionId:s.id,runtimeEpoch:s.runtimeEpoch,event:'PostToolUse',eventId:'unprovable-tool-finished',toolUseId:'tool-456',toolName:'Bash',at:new Date().toISOString()});
+    await m.hook(context!.hookToken,{sessionId:s.id,runtimeToken:context!.runtimeToken,event:'PermissionRequest',eventId:'missing-correlations',at:new Date().toISOString()});
+    await m.hook(context!.hookToken,{sessionId:s.id,runtimeToken:context!.runtimeToken,event:'PostToolUse',eventId:'unprovable-tool-finished',toolUseId:'tool-456',toolName:'Bash',at:new Date().toISOString()});
     assert.equal((await call(m,config,'list')).sessions[0].activity,'approval');
-    await m.hook(context!.hookToken,{sessionId:s.id,runtimeEpoch:s.runtimeEpoch,event:'Stop',eventId:'turn-stopped',at:new Date().toISOString()});
+    await m.hook(context!.hookToken,{sessionId:s.id,runtimeToken:context!.runtimeToken,event:'Stop',eventId:'turn-stopped',at:new Date().toISOString()});
     assert.equal((await call(m,config,'list')).sessions[0].activity,'done');
   } finally { await m.close();rmSync(dir,{recursive:true,force:true}); }
 });
@@ -57,12 +58,12 @@ test('terminate kills remaining managed descendants after the direct PTY process
   const child="process.on('SIGTERM',()=>{});process.on('SIGHUP',()=>{});process.stdout.write('CHILD:'+process.pid+'\\n');setInterval(()=>{},1000)";
   const parent=`const c=require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(child)}],{stdio:['ignore','pipe','ignore']});c.stdout.on('data',d=>process.stdout.write(d));setInterval(()=>{},1000)`;
   const m=new HostManager(config,{detect:async()=>[],launch:async()=>({file:process.execPath,args:['-e',parent],env:{}})});
-  m.on('event',e=>{if(e.event==='output'){const match=/CHILD:(\d+)/.exec(e.data);if(match)childPid=Number(match[1]);}if(e.session?.processState==='exited')exited=true;});
+  m.on('event',e=>{if(e.kind==='pty_output'){const match=/CHILD:(\d+)/.exec(e.data);if(match)childPid=Number(match[1]);}if(e.session?.processState==='exited')exited=true;});
   try {
     const p=await call(m,config,'addProject',{name:'Review',path:root});const s=await call(m,config,'createSession',{projectId:p.id,title:'Tree',agent:'codex'});
-    await call(m,config,'attach',{sessionId:s.id});const owner=await call(m,config,'claimControl',{sessionId:s.id,runtimeEpoch:s.runtimeEpoch});
+    await call(m,config,'attach',{sessionId:s.id,lastAppliedOffset:0});const owner=await call(m,config,'claimControl',{sessionId:s.id,runtimeOffset:s.runtimeOffset});
     await until(()=>!!childPid);
-    await call(m,config,'terminate',{sessionId:s.id,runtimeEpoch:s.runtimeEpoch,controlEpoch:owner.controlEpoch,confirm:true});
+    await call(m,config,'terminate',{sessionId:s.id,runtimeOffset:s.runtimeOffset,controlOffset:owner.controlOffset,confirm:true});
     await until(()=>exited);await new Promise(r=>setTimeout(r,1800));
     assert.throws(()=>process.kill(childPid,0),{code:'ESRCH'});
   } finally { if(childPid)try{process.kill(childPid,'SIGKILL');}catch{}await m.close();rmSync(dir,{recursive:true,force:true}); }
@@ -75,9 +76,9 @@ test('a resume rejected by the process limit leaves the previous exited session 
   try {
     const p=await call(m,config,'addProject',{name:'Review',path:root});
     const first=await call(m,config,'createSession',{projectId:p.id,title:'First',agent:'codex'});
-    await m.hook(contexts.get(first.id)!.hookToken,{sessionId:first.id,runtimeEpoch:first.runtimeEpoch,event:'SessionStart',eventId:'native-id-capture',nativeSessionId:randomUUID(),at:new Date().toISOString()});
-    await call(m,config,'attach',{sessionId:first.id});const owner=await call(m,config,'claimControl',{sessionId:first.id,runtimeEpoch:first.runtimeEpoch});
-    await call(m,config,'terminate',{sessionId:first.id,runtimeEpoch:first.runtimeEpoch,controlEpoch:owner.controlEpoch,confirm:true});await until(()=>exited);
+    await m.hook(contexts.get(first.id)!.hookToken,{sessionId:first.id,runtimeToken:contexts.get(first.id)!.runtimeToken,event:'SessionStart',eventId:'native-id-capture',nativeSessionId:randomUUID(),at:new Date().toISOString()});
+    await call(m,config,'attach',{sessionId:first.id,lastAppliedOffset:0});const owner=await call(m,config,'claimControl',{sessionId:first.id,runtimeOffset:first.runtimeOffset});
+    await call(m,config,'terminate',{sessionId:first.id,runtimeOffset:first.runtimeOffset,controlOffset:owner.controlOffset,confirm:true});await until(()=>exited);
     await call(m,config,'createSession',{projectId:p.id,title:'Second',agent:'codex'});
     await assert.rejects(call(m,config,'resume',{sessionId:first.id}),/上限/);
     assert.equal((await call(m,config,'list')).sessions.find((s:any)=>s.id===first.id).processState,'exited');

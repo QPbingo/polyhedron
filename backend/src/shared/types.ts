@@ -12,7 +12,7 @@ export interface SessionSnapshot {session:Session;baseOffset:number;headOffset:n
 export interface OperationRequest {operationId:string;channelId:string;runtimeOffset?:number;controlOffset?:number|null}
 export interface OperationResult<T=unknown> {operationId:string;status:'applied'|'failed'|'indeterminate';offset:number;result?:T;error?:AppError}
 export interface HostConfig {hostId:string;accountId:string;hostToken:string;ipcToken:string;relayUrl:string;name:string;roots:string[];dataDir?:string;maxHistoryBytes?:number;historyDays?:number;maxSessions?:number;preventSleep?:boolean;keychain?:boolean}
-export interface Rpc {type:'rpc';requestId:string;clientId:string;grant:string;method:string;params:Record<string,unknown>}
+export interface Rpc {type:'rpc';requestId:string;clientId:string;channelId?:string;grant:string;method:string;params:Record<string,unknown>}
 export interface AppError {code:string;message:string}
 export class Fault extends Error { constructor(public code:string,message:string) { super(message); } }
 export function safeError(error:unknown):AppError {return error instanceof Fault?{code:error.code,message:error.message}:{code:'INTERNAL',message:'操作失败，请检查服务诊断日志'};}

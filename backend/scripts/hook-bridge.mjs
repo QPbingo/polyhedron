@@ -19,11 +19,11 @@ process.stdin.on('end', () => {
     const raw = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     if (!raw || typeof raw !== 'object' || !allowed.has(raw.hook_event_name)) return finish();
     const sessionId = identifier(process.env.POLY_SESSION_ID);
-    const runtimeEpoch = identifier(process.env.POLY_RUNTIME_EPOCH);
+    const runtimeToken = identifier(process.env.POLY_RUNTIME_TOKEN);
     const socketPath = process.env.POLY_HOOK_SOCKET;
     const token = process.env.POLY_HOOK_TOKEN;
-    if (!sessionId || !runtimeEpoch || !socketPath?.startsWith('/') || !token || /[\r\n]/.test(token)) return finish();
-    const payload = { sessionId, runtimeEpoch, event: raw.hook_event_name, nativeSessionId: identifier(raw.session_id), eventId: identifier(raw.event_id ?? raw.eventId) ?? randomUUID(), agentId: identifier(raw.agent_id), toolUseId: identifier(raw.tool_use_id), toolName: identifier(raw.tool_name), at: new Date().toISOString() };
+    if (!sessionId || !runtimeToken || !socketPath?.startsWith('/') || !token || /[\r\n]/.test(token)) return finish();
+    const payload = { sessionId, runtimeToken, event: raw.hook_event_name, nativeSessionId: identifier(raw.session_id), eventId: identifier(raw.event_id ?? raw.eventId) ?? randomUUID(), agentId: identifier(raw.agent_id), toolUseId: identifier(raw.tool_use_id), toolName: identifier(raw.tool_name), at: new Date().toISOString() };
     // Invalid child identifiers must not silently turn a child event into a parent event.
     if (raw.agent_id != null && !payload.agentId) return finish();
     const body = JSON.stringify(payload);
