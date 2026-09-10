@@ -1,4 +1,5 @@
--- This mirrors the schema created by RelayStore.init(). It contains account and allowlisted session metadata only.
+-- This mirrors RelayStore.init(): account, login, Host binding, pairing, OIDC and
+-- content-free audit metadata only. It contains no project/session projection.
 CREATE TABLE IF NOT EXISTS accounts (
   id TEXT PRIMARY KEY, issuer TEXT NOT NULL, subject TEXT NOT NULL,
   name TEXT NOT NULL, created_at BIGINT NOT NULL, UNIQUE (issuer, subject)
@@ -27,8 +28,4 @@ CREATE TABLE IF NOT EXISTS audit_events (
 );
 CREATE INDEX IF NOT EXISTS audit_created_idx ON audit_events(created_at);
 
--- Sanitized project/session summaries only; absolute paths, native IDs, input and output are excluded.
-CREATE TABLE IF NOT EXISTS host_projections (
-  host_id TEXT PRIMARY KEY REFERENCES host_bindings(id) ON DELETE CASCADE,
-  projects_json TEXT NOT NULL, sessions_json TEXT NOT NULL, updated_at BIGINT NOT NULL
-);
+DROP TABLE IF EXISTS host_projections;

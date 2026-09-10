@@ -3,7 +3,7 @@ import {resolve} from 'node:path';
 import {realpathSync,statSync,existsSync} from 'node:fs';
 import {hostname} from 'node:os';
 import {randomBytes} from 'node:crypto';
-import {storeHostToken} from '../adapters/keychain.js';
+import {JOURNAL_HEALTHY,storeHostToken} from '../adapters/keychain.js';
 import {writePrivateJson} from '../host/config.js';
 const {values}=parseArgs({options:{relay:{type:'string'},root:{type:'string',multiple:true},name:{type:'string'},config:{type:'string'},'dev-file-credentials':{type:'boolean'}}});
 if(!values.relay||!values.root?.length)throw new Error('用法：npm run pair -- --relay https://your-relay --root /absolute/authorized/project-root [--name Mac]');
@@ -16,8 +16,8 @@ const pending=await post('/api/pairings/start',{name:values.name??hostname()});c
 let done=false;
 while(Date.now()<(typeof pending.expiresAt==='number'?pending.expiresAt:Date.parse(pending.expiresAt))){
  await new Promise(r=>setTimeout(r,2000));const result=await post('/api/pairings/poll',{pairingId:pending.pairingId,pollToken:pending.pollToken});if(result.status!=='approved')continue;
- const config:any={hostId:result.hostId,accountId:result.accountId,ipcToken:randomBytes(32).toString('hex'),name:values.name??hostname(),roots,relayUrl:new URL('/ws/host',url).toString().replace(/^http/,'ws')};
- if(process.platform==='darwin'&&!values['dev-file-credentials']){const service='com.polyhedron.host',account=result.hostId;await storeHostToken(service,account,result.hostToken);config.hostTokenKeychain={service,account};}else if(values['dev-file-credentials'])config.hostToken=result.hostToken;else throw new Error('正式执行端需要 macOS Keychain');
+ const config:any={hostId:result.hostId,accountId:result.accountId,ipcToken:randomBytes(32).toString('hex'),name:values.name??hostname(),roots,relayUrl:new URL('/ws/host',url).toString().replace(/^http/,'ws')},masterKey=randomBytes(32).toString('base64url');
+ if(process.platform==='darwin'&&!values['dev-file-credentials']){const service='com.polyhedron.host',masterService='com.polyhedron.master',healthService='com.polyhedron.health',account=result.hostId;await storeHostToken(service,account,result.hostToken);await storeHostToken(masterService,account,masterKey);await storeHostToken(healthService,account,JOURNAL_HEALTHY);config.hostTokenKeychain={service,account};config.masterKeyKeychain={service:masterService,account};config.healthLatchKeychain={service:healthService,account};delete config.masterKey;}else if(values['dev-file-credentials']){config.hostToken=result.hostToken;config.masterKey=masterKey}else throw new Error('正式执行端需要 macOS Keychain');
  writePrivateJson(path,config);console.log('绑定完成，配置已保存。可启动 host 和 connector。');done=true;break;
 }
 if(!done)throw new Error('绑定码已过期，请重新发起绑定');

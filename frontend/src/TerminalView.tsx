@@ -5,86 +5,52 @@ import {SearchAddon} from '@xterm/addon-search';
 import {WebglAddon} from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import {RpcClient,type Connection} from './api';
-import {OutputCursor,inputAllowed} from './protocol';
+import {OffsetCursor,inputAllowed} from './protocol';
 import {onTerminalUserInput} from './terminalInput';
 import {highlightTerminalInputs} from './terminalHighlights';
-import {active,type Session,type Snapshot,type Output} from './types';
+import {active,type JournalEvent,type Session,type SessionSnapshot} from './types';
 export interface TerminalActions {claim:()=>Promise<void>;interrupt:()=>Promise<void>;terminate:()=>Promise<void>;find:(text:string,previous?:boolean)=>boolean;copy:()=>Promise<void>}
-interface Props {session:Session;rpc:RpcClient;connection:Connection;hostOnline:boolean;fontSize:number;palette:string;onSession:(s:Session)=>void;onError:(message:string)=>void}
+interface Props {session:Session;rpc:RpcClient;connection:Connection;hostOnline:boolean;fontSize:number;palette:string;onSession:(session:Session)=>void;onError:(message:string)=>void}
+
 export const TerminalView=forwardRef<TerminalActions,Props>(function TerminalView(props,ref){
  const container=useRef<HTMLDivElement>(null),terminal=useRef<Terminal|null>(null),fit=useRef<FitAddon|null>(null),search=useRef<SearchAddon|null>(null);
- const session=useRef(props.session),current=useRef(props),snapshotReady=useRef(false),inputSupported=useRef(true),resized=useRef(false),inputSeq=useRef(0),writeChain=useRef<Promise<void>>(Promise.resolve()),resizeVersion=useRef(0);
+ const session=useRef(props.session),current=useRef(props),snapshotReady=useRef(false),inputSupported=useRef(true),resized=useRef(false),writeChain=useRef<Promise<void>>(Promise.resolve()),resizeVersion=useRef(0),appliedOffset=useRef(0);
  const [hint,setHint]=useState('正在读取终端快照…');current.current=props;
- const permitted=()=>inputSupported.current&&inputAllowed({online:current.current.connection==='online'&&current.current.hostOnline,snapshot:snapshotReady.current,resized:resized.current,controller:session.current.controller,clientId:props.rpc.clientId,running:active(session.current)});
- const syncGate=()=>{const ok=permitted();if(terminal.current)terminal.current.options.disableStdin=!ok;setHint(!inputSupported.current?'终端输入不可用 · 需要匹配的 xterm 版本':current.current.connection!=='online'||!current.current.hostOnline?'连接已断开 · 输入已暂停':!snapshotReady.current?'正在读取终端快照…':ok?'已接管 · 可直接在终端输入':active(session.current)?'只读 · 在会话详情中接管':'进程已结束 · 可查看历史或恢复会话')};
- useEffect(()=>{if(session.current.controlEpoch!==props.session.controlEpoch||session.current.controller!==props.session.controller){resized.current=false;resizeVersion.current++}session.current=props.session;syncGate()},[props.session,props.connection,props.hostOnline]);
+ const permitted=()=>{const activeChannel=props.rpc.channelId(session.current.hostId);return inputSupported.current&&inputAllowed({online:current.current.connection==='online'&&current.current.hostOnline,snapshot:snapshotReady.current,resized:resized.current,controller:session.current.controller,channelId:activeChannel,running:active(session.current),journalReady:session.current.journalState==='ready'})};
+ const syncGate=()=>{const ok=permitted(),state=session.current.journalState;if(terminal.current)terminal.current.options.disableStdin=!ok;setHint(state!=='ready'?'本地会话记录不可用 · 远程读取和输入已暂停':!inputSupported.current?'终端输入不可用 · 需要匹配的 xterm 版本':current.current.connection!=='online'||!current.current.hostOnline?'连接已断开 · 输入已暂停':!snapshotReady.current?'正在读取终端快照…':ok?'已接管 · 可直接在终端输入':active(session.current)?'只读 · 在会话详情中接管':'进程已结束 · 可查看历史或恢复会话')};
+ useEffect(()=>{if(session.current.controlOffset!==props.session.controlOffset||session.current.controller!==props.session.controller){resized.current=false;resizeVersion.current++}session.current=props.session;syncGate()},[props.session,props.connection,props.hostOnline]);
  const resize=async()=>{
-  if(!terminal.current||!fit.current||!snapshotReady.current||session.current.controller!==props.rpc.clientId||current.current.connection!=='online')return;
+  const channelId=props.rpc.channelId(session.current.hostId);if(!terminal.current||!fit.current||!snapshotReady.current||session.current.controller!==channelId||current.current.connection!=='online'||session.current.journalState!=='ready')return;
   const dimensions=fit.current.proposeDimensions();if(resized.current&&dimensions&&session.current.cols===dimensions.cols&&session.current.rows===dimensions.rows&&terminal.current.cols===dimensions.cols&&terminal.current.rows===dimensions.rows)return;
-  const version=++resizeVersion.current;resized.current=false;syncGate();fit.current.fit();
-  const s=session.current;const result=await props.rpc.request<Session>(s.hostId,'resize',{sessionId:s.id,runtimeEpoch:s.runtimeEpoch,controlEpoch:s.controlEpoch,cols:terminal.current.cols,rows:terminal.current.rows});
-  if(version!==resizeVersion.current||session.current.controlEpoch!==result.controlEpoch||session.current.runtimeEpoch!==result.runtimeEpoch)return;
-  session.current=result;resized.current=true;current.current.onSession(result);syncGate();
+  const version=++resizeVersion.current;resized.current=false;syncGate();fit.current.fit();const before=session.current,result=await props.rpc.request<Session>(before.hostId,'resize',{sessionId:before.id,runtimeOffset:before.runtimeOffset,controlOffset:before.controlOffset,cols:terminal.current.cols,rows:terminal.current.rows});
+  if(version!==resizeVersion.current||session.current.controlOffset!==result.controlOffset||session.current.runtimeOffset!==result.runtimeOffset)return;session.current=result;resized.current=true;current.current.onSession(result);syncGate();
  };
  useImperativeHandle(ref,()=>({
-  claim:async()=>{if(!inputSupported.current)throw new Error('当前终端版本无法验证输入来源');if(!snapshotReady.current)throw new Error('终端快照尚未就绪');resized.current=false;syncGate();const s=session.current;const result=await props.rpc.request<Session>(s.hostId,'claimControl',{sessionId:s.id,runtimeEpoch:s.runtimeEpoch});session.current=result;inputSeq.current=0;current.current.onSession(result);await resize();terminal.current?.focus()},
-  interrupt:async()=>{if(!permitted())throw new Error('请先接管控制');const s=session.current;await props.rpc.request(s.hostId,'interrupt',{sessionId:s.id,runtimeEpoch:s.runtimeEpoch,controlEpoch:s.controlEpoch})},
-  terminate:async()=>{if(!permitted())throw new Error('请先接管控制');const s=session.current;await props.rpc.request(s.hostId,'terminate',{sessionId:s.id,runtimeEpoch:s.runtimeEpoch,controlEpoch:s.controlEpoch,confirm:true})},
+  claim:async()=>{if(!inputSupported.current)throw new Error('当前终端版本无法验证输入来源');if(!snapshotReady.current)throw new Error('终端快照尚未就绪');if(session.current.journalState!=='ready')throw new Error('本地会话记录不可用');resized.current=false;syncGate();const before=session.current,result=await props.rpc.request<Session>(before.hostId,'claimControl',{sessionId:before.id,runtimeOffset:before.runtimeOffset});session.current=result;current.current.onSession(result);await resize();terminal.current?.focus()},
+  interrupt:async()=>{if(!permitted())throw new Error('请先接管控制');const value=session.current;await props.rpc.request(value.hostId,'interrupt',{sessionId:value.id,runtimeOffset:value.runtimeOffset,controlOffset:value.controlOffset})},
+  terminate:async()=>{if(!permitted())throw new Error('请先接管控制');const value=session.current;await props.rpc.request(value.hostId,'terminate',{sessionId:value.id,runtimeOffset:value.runtimeOffset,controlOffset:value.controlOffset,confirm:true})},
   find:(text,previous=false)=>text?(previous?search.current?.findPrevious(text):search.current?.findNext(text))??false:false,
   copy:async()=>{const selection=terminal.current?.getSelection();if(!selection)throw new Error('请先在终端中选择要复制的文字');await navigator.clipboard.writeText(selection)}
  }));
  useEffect(()=>{
   const term=new Terminal({fontSize:props.fontSize,fontFamily:'"SFMono-Regular", Menlo, Consolas, monospace',lineHeight:1.25,scrollback:10000,convertEol:false,disableStdin:true,allowProposedApi:false,screenReaderMode:true,cursorBlink:false,linkHandler:{allowNonHttpProtocols:false,activate:(event,text)=>{if(!event.isTrusted)return;try{const url=new URL(text);if(['http:','https:'].includes(url.protocol)&&window.confirm(`打开终端中的链接？\n${url.href}`))window.open(url.href,'_blank','noopener,noreferrer')}catch{current.current.onError('此终端链接无效')}}},theme:{background:getComputedStyle(document.documentElement).getPropertyValue('--terminal').trim()||'#101e3d',foreground:'#e3ebf7',cursor:'#a5c7ff'}});
-  const fitter=new FitAddon(),finder=new SearchAddon();term.loadAddon(fitter);term.loadAddon(finder);term.open(container.current!);terminal.current=term;fit.current=fitter;search.current=finder;
-  // WebGL is optional; canvas context loss falls back to xterm's DOM renderer.
-  try{const webgl=new WebglAddon();webgl.onContextLoss(()=>webgl.dispose());term.loadAddon(webgl)}catch{/* DOM renderer remains available. */}
-  const clipboardGuard=term.parser.registerOscHandler(52,()=>true);
-  const highlights=highlightTerminalInputs(term,props.session.agent);
-  const subscription=onTerminalUserInput(term,data=>{
-   if(!permitted())return;
-   if(new TextEncoder().encode(data).byteLength>16384){current.current.onError('本次输入超过 16 KiB，请分段粘贴');return}
-   const s=session.current;const seq=++inputSeq.current;
-   void props.rpc.request(s.hostId,'input',{sessionId:s.id,runtimeEpoch:s.runtimeEpoch,controlEpoch:s.controlEpoch,inputSeq:seq,data}).catch(e=>{resized.current=false;syncGate();current.current.onError(e.message)});
-  },message=>{inputSupported.current=false;current.current.onError(message);term.options.disableStdin=true});
-  let resizeTimer:ReturnType<typeof setTimeout>;const observer=new ResizeObserver(()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>void resize().catch(e=>current.current.onError(e.message)),120)});observer.observe(container.current!);
+  const fitter=new FitAddon(),finder=new SearchAddon();term.loadAddon(fitter);term.loadAddon(finder);term.open(container.current!);terminal.current=term;fit.current=fitter;search.current=finder;try{const webgl=new WebglAddon();webgl.onContextLoss(()=>webgl.dispose());term.loadAddon(webgl)}catch{/* DOM renderer remains available. */}
+  const clipboardGuard=term.parser.registerOscHandler(52,()=>true),highlights=highlightTerminalInputs(term,props.session.agent),subscription=onTerminalUserInput(term,data=>{if(!permitted())return;if(new TextEncoder().encode(data).byteLength>16384){current.current.onError('本次输入超过 16 KiB，请分段粘贴');return}const value=session.current;void props.rpc.request(value.hostId,'input',{sessionId:value.id,runtimeOffset:value.runtimeOffset,controlOffset:value.controlOffset,data}).catch(error=>{resized.current=false;syncGate();current.current.onError(error.message)})},message=>{inputSupported.current=false;current.current.onError(message);term.options.disableStdin=true});
+  let resizeTimer:ReturnType<typeof setTimeout>;const observer=new ResizeObserver(()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>void resize().catch(error=>current.current.onError(error.message)),120)});observer.observe(container.current!);
   return ()=>{clearTimeout(resizeTimer);observer.disconnect();subscription.dispose();clipboardGuard.dispose();highlights.dispose();term.dispose();terminal.current=null;fit.current=null;search.current=null};
  },[]);
- useEffect(()=>{const t=terminal.current;if(!t)return;t.options.fontSize=props.fontSize;t.options.theme={background:getComputedStyle(document.documentElement).getPropertyValue('--terminal').trim(),foreground:'#e3ebf7',cursor:'#a5c7ff',selectionBackground:'#526d9690'};void resize().catch(e=>current.current.onError(e.message))},[props.fontSize,props.palette]);
+ useEffect(()=>{const value=terminal.current;if(!value)return;value.options.fontSize=props.fontSize;value.options.theme={background:getComputedStyle(document.documentElement).getPropertyValue('--terminal').trim(),foreground:'#e3ebf7',cursor:'#a5c7ff',selectionBackground:'#526d9690'};void resize().catch(error=>current.current.onError(error.message))},[props.fontSize,props.palette]);
  useEffect(()=>{
-  const s=props.session;const term=terminal.current!;let disposed=false,failed=false,snapshotVersion=0,attaching=false,resyncPending=false,ackFloor=0;let cursor=new OutputCursor(s.runtimeEpoch);snapshotReady.current=false;resized.current=false;resizeVersion.current++;writeChain.current=Promise.resolve();syncGate();
-  if(props.connection!=='online'||!props.hostOnline)return;
-  const acknowledge=(seq:number)=>{if(!disposed&&seq>=ackFloor)void props.rpc.request(s.hostId,'outputAck',{sessionId:s.id,runtimeEpoch:s.runtimeEpoch,seq}).catch(e=>{if(seq>=ackFloor)fail(e)})};
-  const fail=(e:unknown)=>{if(disposed||failed)return;failed=true;snapshotReady.current=false;resized.current=false;syncGate();setHint('终端读取失败 · 点击重新读取终端重试');current.current.onError(e instanceof Error?e.message:String(e));void props.rpc.request(s.hostId,'detach',{sessionId:s.id}).catch(()=>{})};
-  const write=(data:string,seq:number,geometry?:{cols:number;rows:number})=>{
-   writeChain.current=writeChain.current.then(()=>new Promise<void>(resolve=>{if(disposed||failed){resolve();return}if(geometry){term.reset();term.resize(geometry.cols,geometry.rows)}term.write(data,()=>{if(!disposed&&!failed)acknowledge(seq);resolve()})}));return writeChain.current;
-  };
-  const applySnapshot=async(snapshot:Snapshot,initial:boolean)=>{
-   if(disposed||failed)return;
-   if(snapshot.session.runtimeEpoch!==s.runtimeEpoch){current.current.onSession(snapshot.session);return}
-   const version=++snapshotVersion;ackFloor=Math.max(ackFloor,snapshot.seq);snapshotReady.current=false;syncGate();
-   if(session.current.controlEpoch!==snapshot.session.controlEpoch||session.current.controller!==snapshot.session.controller)resized.current=false;
-   session.current=snapshot.session;current.current.onSession(snapshot.session);
-   // Broadcast snapshots are authoritative after another viewer resizes the PTY.
-   // Serialize reset with all earlier writes; subsequent output is queued behind it.
-   const queued=initial?cursor.snapshot(snapshot.seq):[];
-   if(!initial){cursor=new OutputCursor(s.runtimeEpoch);cursor.snapshot(snapshot.seq)}
-   void write(snapshot.data,snapshot.seq,{cols:snapshot.cols,rows:snapshot.rows});
-   for(const item of queued)void write(item.data,item.seq);
-   await writeChain.current;if(disposed||failed||version!==snapshotVersion)return;
-   snapshotReady.current=true;syncGate();
-   if(snapshot.truncated)current.current.onError('当前快照已截断；可在历史记录中查看较早输出');
-  };
-  const attach=()=>{
-   if(disposed||failed)return;if(attaching){resyncPending=true;return}attaching=true;const version=snapshotVersion;snapshotReady.current=false;resized.current=false;cursor=new OutputCursor(s.runtimeEpoch);syncGate();
-   void props.rpc.request<Snapshot>(s.hostId,'attach',{sessionId:s.id}).then(snapshot=>{if(version===snapshotVersion)return applySnapshot(snapshot,true)}).catch(fail).finally(()=>{attaching=false;if(resyncPending){resyncPending=false;attach()}});
-  };
-  const unsubscribe=props.rpc.subscribe((event:Output&Snapshot)=>{
-   if(event.type!=='event'||event.hostId!==s.hostId||event.sessionId!==s.id||event.clientId!==props.rpc.clientId)return;
-   try{if(event.event==='output'){for(const item of cursor.push(event))void write(item.data,item.seq)}else if((event.event as string)==='snapshot'){void applySnapshot(event,false).catch(fail)}else if((event.event as string)==='resync'){attach()}}catch(e){fail(e)}
-  });
-  attach();
-  return ()=>{disposed=true;unsubscribe();snapshotReady.current=false;resized.current=false;resizeVersion.current++;void props.rpc.request(s.hostId,'detach',{sessionId:s.id}).catch(()=>{})};
- },[props.session.id,props.session.runtimeEpoch,props.connection,props.hostOnline]);
-
+  const selected=props.session,term=terminal.current!;let disposed=false,failed=false,attaching=false,resyncPending=false,cursor=new OffsetCursor(),eventChain:Promise<void>=Promise.resolve();snapshotReady.current=false;resized.current=false;resizeVersion.current++;writeChain.current=Promise.resolve();syncGate();if(props.connection!=='online'||!props.hostOnline||selected.journalState!=='ready')return;
+  const acknowledge=(offset:number)=>{appliedOffset.current=Math.max(appliedOffset.current,offset);if(!disposed)void props.rpc.request(selected.hostId,'eventAck',{sessionId:selected.id,appliedOffset:offset}).catch(()=>{/* A reconnect will resynchronize from Host. */})};
+  const write=(data:string,offset:number,geometry?:{cols:number;rows:number})=>{writeChain.current=writeChain.current.then(()=>new Promise<void>(resolve=>{if(disposed||failed){resolve();return}if(geometry){term.reset();term.resize(geometry.cols,geometry.rows)}term.write(data,()=>{if(!disposed&&!failed)acknowledge(offset);resolve()})}));return writeChain.current};
+  const applyEvent=(event:JournalEvent)=>{if(event.session){if(session.current.controlOffset!==event.session.controlOffset||session.current.controller!==event.session.controller){resized.current=false;resizeVersion.current++}session.current=event.session;current.current.onSession(event.session);syncGate()}if(event.kind==='pty_output'&&typeof event.data==='string')void write(event.data,event.offset);else if(event.kind==='resize_applied'&&Number.isInteger(event.payload?.cols)&&Number.isInteger(event.payload?.rows)){writeChain.current=writeChain.current.then(()=>{if(!disposed&&!failed){term.resize(Number(event.payload!.cols),Number(event.payload!.rows));acknowledge(event.offset)}})}else{writeChain.current=writeChain.current.then(()=>{if(!disposed&&!failed)acknowledge(event.offset)})}};
+  const fail=(error:unknown)=>{if(disposed||failed)return;failed=true;snapshotReady.current=false;resized.current=false;syncGate();setHint('终端读取失败 · 点击重新读取终端重试');current.current.onError(error instanceof Error?error.message:String(error));void props.rpc.request(selected.hostId,'detach',{sessionId:selected.id}).catch(()=>{})};
+  const applySnapshot=async(snapshot:SessionSnapshot)=>{if(disposed||failed)return;if(snapshot.session.runtimeOffset!==selected.runtimeOffset){current.current.onSession(snapshot.session);return}const previous=cursor,previousPending=previous.appliedOffset===null?[...previous.pending]:[];if(previous.appliedOffset!==null&&previous.appliedOffset>snapshot.headOffset)throw new Error('OFFSET_GAP');snapshotReady.current=false;resized.current=false;syncGate();const replacement=new OffsetCursor();for(const event of snapshot.events??[])replacement.push(event);const replay=replacement.installSnapshot(snapshot.baseOffset,snapshot.session.runtimeOffset);if((replacement.appliedOffset??snapshot.baseOffset)!==snapshot.headOffset)throw new Error('OFFSET_GAP');cursor=replacement;await write(snapshot.data,snapshot.baseOffset,{cols:snapshot.cols,rows:snapshot.rows});session.current=snapshot.session;current.current.onSession(snapshot.session);for(const event of replay)applyEvent(event as JournalEvent);for(const event of (previousPending as JournalEvent[]).sort((a,b)=>a.offset-b.offset))for(const item of cursor.push(event))applyEvent(item as JournalEvent);await writeChain.current;if(disposed||failed)return;const channelId=props.rpc.channelId(session.current.hostId);resized.current=!!channelId&&session.current.controller===channelId&&term.cols===session.current.cols&&term.rows===session.current.rows;snapshotReady.current=true;syncGate();if(snapshot.truncated)current.current.onError('当前快照已截断；可在历史记录中查看较早输出')};
+  const schedule=(task:()=>Promise<void>|void)=>{eventChain=eventChain.then(task).catch(fail);return eventChain};
+  const attach=()=>{if(disposed||failed)return;if(attaching){resyncPending=true;return}resyncPending=false;attaching=true;snapshotReady.current=false;resized.current=false;cursor=new OffsetCursor();syncGate();void props.rpc.request<SessionSnapshot>(selected.hostId,'attach',{sessionId:selected.id,lastAppliedOffset:appliedOffset.current}).then(snapshot=>schedule(()=>applySnapshot(snapshot))).catch(fail).finally(()=>{attaching=false;if(resyncPending)attach()})};
+  const unsubscribe=props.rpc.subscribe((event:JournalEvent&{event:string})=>{if(event.type!=='event'||event.hostId!==selected.hostId||event.sessionId!==selected.id||event.channelId!==props.rpc.channelId(selected.hostId))return;void schedule(async()=>{try{if(event.event==='journal'){for(const item of cursor.push(event))applyEvent(item as JournalEvent);await writeChain.current}else if(event.event==='snapshot')await applySnapshot(event as unknown as SessionSnapshot);else if(event.event==='resync'){resyncPending=true;attach()}}catch(error){if(error instanceof Error&&error.message==='OFFSET_GAP'){resyncPending=true;attach()}else if(error instanceof Error&&error.message==='RUNTIME_CHANGED'&&event.session){current.current.onSession(event.session)}else throw error}})});attach();
+  return ()=>{disposed=true;unsubscribe();snapshotReady.current=false;resized.current=false;resizeVersion.current++;void props.rpc.request(selected.hostId,'detach',{sessionId:selected.id}).catch(()=>{})};
+ },[props.session.id,props.session.runtimeOffset,props.connection,props.hostOnline]);
  return <><div className="terminal-container" ref={container} aria-label="Agent 实时终端"/><div className="terminal-footer"><span role="status">{hint}</span></div></>;
 });

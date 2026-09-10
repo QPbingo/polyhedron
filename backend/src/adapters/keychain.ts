@@ -1,4 +1,7 @@
-import { spawn } from 'node:child_process';
+import {spawn,spawnSync} from 'node:child_process';
+
+export const JOURNAL_HEALTHY='UE9MWUhFRFJPTjpIRUFMVEhZOlYxISEh';
+export const JOURNAL_FAILED='UE9MWUhFRFJPTjpGQUlMRUQ6VjEhISEh';
 
 function validate(service: string, account: string): void {
   if (![service, account].every(v => /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,159}$/.test(v))) throw new Error('Invalid Keychain identifier');
@@ -37,4 +40,9 @@ export async function storeHostToken(service: string, account: string, token: st
 export async function deleteHostToken(service: string, account: string): Promise<void> {
   validate(service, account);
   await security(['delete-generic-password','-s',service,'-a',account]);
+}
+
+export function storeJournalHealthSync(service:string,account:string,failed:boolean):void{
+  validate(service,account);platform();const value=failed?JOURNAL_FAILED:JOURNAL_HEALTHY,result=spawnSync('/usr/bin/security',['-i'],{input:`add-generic-password -U -s ${service} -a ${account} -w ${value}\n`,encoding:'utf8',timeout:10_000,maxBuffer:16_384});
+  if(result.error||result.status!==0)throw new Error('Keychain journal-health update failed');const verified=spawnSync('/usr/bin/security',['find-generic-password','-s',service,'-a',account,'-w'],{encoding:'utf8',timeout:10_000,maxBuffer:16_384});if(verified.error||verified.status!==0||verified.stdout.trim()!==value)throw new Error('Keychain journal-health verification failed');
 }

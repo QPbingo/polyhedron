@@ -9,11 +9,15 @@
 - `npm run diagnose`：检查原生 CLI 路径、版本、功能支持。
 - `npm test` / `npm run typecheck` / `npm run build`：测试、检查与编译。
 
-`src/relay` 只保存账号、登录、主机绑定、配对和无正文审计；开发用 SQLite，生产要求 PostgreSQL。`src/host` 使用 SQLite 保存项目/会话/Hook/快照，分段文件保存终端输出。默认128MiB、30天，快照与Hook也受清理约束；运行中最新恢复快照始终保留，因此必要快照可能超过极小配置配额。SQLite页和WAL的物理文件开销不等同于正文配额，运维需监控实际磁盘。
+`src/relay` 只保存账号、登录、主机绑定、配对和无正文审计；开发用 SQLite，生产要求 PostgreSQL。它不保存项目、会话、路径、Agent 状态、输入、输出、快照或历史投影。`src/host` 的单一 SQLite journal 是会话事实的唯一权威来源，项目、会话、Hook、快照和终端输出均使用 AES-256-GCM 静态加密；WAL 使用 `synchronous=FULL`。历史默认永久保留，设置中的天数和容量仅用于磁盘告警，不会自动删除记录。
 
-每个会话最多一个控制者；运行世代、操作权版本、输入序号由主机验证。授权票据绑定账号、主机、浏览器、方法、会话/运行和30秒有效期。输出按解析序号发送，快照不落在未完成控制序列中；普通输出积压2MiB、快照独立8MiB上限，慢客户端需重新取快照。后台终端只在 Mac 维护权威状态，浏览器只挂载选中的终端。
+每个会话最多一个可写加密通道。Host 用单一递增 `offset` 排列运行、接管、输入、尺寸、Hook 和 PTY 输出事实；`runtimeOffset` 与 `controlOffset` 都是对应 journal 事件的 offset，不存在额外输入/输出序号。所有操作先提交 requested 记录，再执行副作用，再提交结果；结果未知不会自动重放。输出必须先提交，再更新 headless 终端并广播。journal 写入失败时暂停 PTY 读取并关闭远程历史与控制，Agent 不会被自动结束。
 
-主机服务使用 mode0700 数据目录、mode0600 IPC Unix socket 和独立令牌。运行配置由 `HOST_CONFIG` 或 `--config` 指定。远程中继必须WSS；根目录只能在执行Mac授权。服务启动用独占 startup目录串行修复陈旧PID，防止并发启动修改同一SQLite。若启动过程中被强制终止而留下 `host-startup.lock`，先核对该配置的 `host.pid` 对应进程未运行，再删除空的启动锁目录并重启。
+浏览器与 Host 使用 P-256 ECDH、HKDF-SHA256、AES-256-GCM 和 Ed25519 Host 身份签名建立内容加密通道。正常工作的 Relay 只能看到路由标识、短期授权和密文。Host 私钥使用独立、仅存于本机 Keychain 的主密钥加密；浏览器以 TOFU 方式固定 Host 指纹，指纹变化时拒绝连接。首次连接仍应在高安全场景通过执行主机本地指纹做带外核对。由于“同账号新设备无需本地批准”的产品约束，Relay 当前仍是授权信任边界；主动恶意 Relay 可以使用所持 Host 授权凭据另开通道并发起操作，不能将本实现描述为对 Relay 的零信任方案。
+
+主机崩溃后正在运行的本地 PTY 无法恢复，重启会提交 `runtime_interrupted` 并清除旧控制权。只有 requested、没有结果的操作恢复为 `operation_indeterminate`。损坏的终端快照会从加密 journal 重放；journal 或密钥完整性失败时服务失败关闭。修复磁盘/密钥问题前不要删除数据库或生成替代密钥。
+
+主机服务使用 mode0700 数据目录、mode0600 IPC Unix socket 和独立令牌。运行配置由 `HOST_CONFIG` 或 `--config` 指定。远程中继必须 WSS；根目录只能在执行 Mac 授权。服务在读取或迁移配置前原子创建并同步 `host.pid`，防止两个进程同时修改同一 SQLite；进程被强制终止后，下次启动会先核对 PID 存活性与记录文件身份，再安全清理陈旧记录，无需手工删除启动锁目录。
 
 Hook 不接收权限决定，也不传送prompt、tool_input或tool_output。审批优先使用toolUseId关联，缺少ID时仅唯一同名tool关联；缺少关联证据时保持待审批直到权威Stop，不用无关并行工具事件清除。子Agent事件不改变父状态，缺失Hook显示未知。
 

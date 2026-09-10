@@ -3,7 +3,6 @@ import { Pool } from 'pg';
 import { createHash, createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import {sanitizeProjection,projectSummary,sessionSummary,type HostProjection} from './projection.js';
 
 export const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 export const secret = () => randomBytes(32).toString('base64url');
@@ -21,13 +20,12 @@ CREATE TABLE IF NOT EXISTS browser_sessions (id_hash TEXT PRIMARY KEY, account_i
 CREATE INDEX IF NOT EXISTS browser_account_idx ON browser_sessions(account_id);
 CREATE TABLE IF NOT EXISTS host_bindings (id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id), name TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, token_cipher TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0, created_at BIGINT NOT NULL);
 CREATE INDEX IF NOT EXISTS hosts_account_idx ON host_bindings(account_id);
-CREATE TABLE IF NOT EXISTS host_projections (host_id TEXT PRIMARY KEY REFERENCES host_bindings(id) ON DELETE CASCADE, projects_json TEXT NOT NULL, sessions_json TEXT NOT NULL, updated_at BIGINT NOT NULL);
 CREATE TABLE IF NOT EXISTS pairings (id TEXT PRIMARY KEY, code_hash TEXT NOT NULL UNIQUE, poll_hash TEXT NOT NULL, name TEXT NOT NULL, expires_at BIGINT NOT NULL, account_id TEXT REFERENCES accounts(id), host_id TEXT, status TEXT NOT NULL DEFAULT 'pending', issued INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS oidc_flows (id_hash TEXT PRIMARY KEY, payload_cipher TEXT NOT NULL, expires_at BIGINT NOT NULL);
 CREATE TABLE IF NOT EXISTS audit_events (id TEXT PRIMARY KEY, account_id TEXT, host_id TEXT, event TEXT NOT NULL, created_at BIGINT NOT NULL);
 CREATE INDEX IF NOT EXISTS audit_created_idx ON audit_events(created_at);
 `;
-/** Account and allowlisted session metadata only; never project paths or terminal content. */
+/** Account, login, host-binding and transport-audit metadata only. */
 export class RelayStore {
   private sqlite?: DatabaseSync;
   private pool?: Pool;
@@ -44,7 +42,7 @@ export class RelayStore {
       if (path !== ':memory:') chmodSync(path, 0o600);
     }
   }
-  async init() { if (this.sqlite) this.sqlite.exec(schema); else await this.pool!.query(schema); }
+  async init() { if (this.sqlite) {this.sqlite.exec(schema);this.sqlite.exec('DROP TABLE IF EXISTS host_projections');} else {await this.pool!.query(schema);await this.pool!.query('DROP TABLE IF EXISTS host_projections');} }
   private async query(sql: string, params: any[] = []): Promise<Row[]> {
     if (this.sqlite) return this.sqlite.prepare(sql.replace(/\$\d+/g, '?')).all(...params) as Row[];
     return (await this.pool!.query(sql, params)).rows;
@@ -99,34 +97,7 @@ export class RelayStore {
   revokeHost(id:string,accountId:string) { return this.run(()=>this.transaction(async()=>{
     const rows=await this.query('UPDATE host_bindings SET revoked=1 WHERE id=$1 AND account_id=$2 AND revoked=0 RETURNING id',[id,accountId]);
     if(!rows.length) throw new RelayError('HOST_NOT_FOUND','Host not found',404);
-    await this.query('DELETE FROM host_projections WHERE host_id=$1',[id]);
   })); }
-  private async saveProjection(hostId:string,accountId:string,projection:HostProjection){
-    const projects=JSON.stringify(projection.projects),sessions=JSON.stringify(projection.sessions);
-    if(Buffer.byteLength(projects)+Buffer.byteLength(sessions)>8*1024*1024)throw new RelayError('PROJECTION_TOO_LARGE','Host metadata exceeds the offline summary limit',413);
-    await this.query('INSERT INTO host_projections(host_id,projects_json,sessions_json,updated_at) SELECT id,$1,$2,$3 FROM host_bindings WHERE id=$4 AND account_id=$5 AND revoked=0 ON CONFLICT(host_id) DO UPDATE SET projects_json=excluded.projects_json,sessions_json=excluded.sessions_json,updated_at=excluded.updated_at',[projects,sessions,Date.now(),hostId,accountId]);
-  }
-  replaceProjection(hostId:string,accountId:string,input:unknown){
-    const projection=sanitizeProjection(hostId,input);
-    return this.run(()=>this.saveProjection(hostId,accountId,projection));
-  }
-  mergeProjection(hostId:string,accountId:string,input:{project?:unknown;session?:unknown}){
-    const project=projectSummary(hostId,input.project),session=sessionSummary(hostId,input.session);
-    if(!project&&!session)return Promise.resolve();
-    return this.run(async()=>{
-      const [row]=await this.query('SELECT p.projects_json,p.sessions_json FROM host_projections p JOIN host_bindings h ON h.id=p.host_id WHERE p.host_id=$1 AND h.account_id=$2 AND h.revoked=0',[hostId,accountId]);
-      const projection:HostProjection=row?{projects:JSON.parse(row.projects_json),sessions:JSON.parse(row.sessions_json)}:{projects:[],sessions:[]};
-      if(project){const i=projection.projects.findIndex(p=>p.id===project.id);if(i<0)projection.projects.push(project);else projection.projects[i]=project;}
-      if(session){const i=projection.sessions.findIndex(s=>s.id===session.id);if(i<0)projection.sessions.push(session);else projection.sessions[i]=session;}
-      await this.saveProjection(hostId,accountId,projection);
-    });
-  }
-  getProjection(hostId:string,accountId:string){return this.run(async():Promise<HostProjection>=>{
-    const [row]=await this.query('SELECT p.projects_json,p.sessions_json FROM host_projections p JOIN host_bindings h ON h.id=p.host_id WHERE p.host_id=$1 AND h.account_id=$2 AND h.revoked=0',[hostId,accountId]);
-    if(!row)return {projects:[],sessions:[]};
-    return {projects:JSON.parse(row.projects_json).map((project:Record<string,unknown>)=>({...project,path:''})),sessions:JSON.parse(row.sessions_json)};
-  }); }
-
   startPairing(name:string,ttlMs:number) { return this.run(async()=>{
     const pairingId=randomUUID(), code=randomBytes(5).toString('hex').toUpperCase(),pollToken=secret(),expiresAt=Date.now()+ttlMs;
     await this.query('INSERT INTO pairings(id,code_hash,poll_hash,name,expires_at) VALUES($1,$2,$3,$4,$5)',[pairingId,digest(code),digest(pollToken),name,expiresAt]);

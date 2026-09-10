@@ -40,9 +40,11 @@ interface Props{
  onResume:()=>void;
  onArchive:()=>void;
  onTerminate:()=>void;
+ onRecover:()=>void;
+ onDelete:()=>void;
 }
 
-export function Workspace({current,project,host,canUse,busy,connection,rpc,terminal,terminalVersion,fontSize,palette,details,searchOpen,terminalQuery,hasProjects,hasHosts,onToggleDetails,onReload,onToggleSearch,onSearchQuery,onFind,onCopy,onSession,onError,onConnectHost,onAddProject,onClaim,onInterrupt,onRename,onHistory,onResume,onArchive,onTerminate}:Props){
+export function Workspace({current,project,host,canUse,busy,connection,rpc,terminal,terminalVersion,fontSize,palette,details,searchOpen,terminalQuery,hasProjects,hasHosts,onToggleDetails,onReload,onToggleSearch,onSearchQuery,onFind,onCopy,onSession,onError,onConnectHost,onAddProject,onClaim,onInterrupt,onRename,onHistory,onResume,onArchive,onTerminate,onRecover,onDelete}:Props){
  return <section className="workspace-card" id="terminal-workspace" aria-label="当前会话工作区" tabIndex={-1}>
   <section className="terminal-frame" aria-label="Agent 终端">
    <header className="terminal-toolbar">
@@ -55,8 +57,8 @@ export function Workspace({current,project,host,canUse,busy,connection,rpc,termi
     </div>
    </header>
    {searchOpen&&<form className="terminal-search glass-control" onSubmit={event=>{event.preventDefault();onFind()}}><input type="search" aria-label="在终端中查找" value={terminalQuery} onChange={event=>onSearchQuery(event.target.value)} autoFocus placeholder="搜索终端输出…" spellCheck={false}/><button type="button" onClick={()=>onFind(true)}>上一个</button><button>下一个</button><ToolButton label="关闭终端搜索" icon="close" onClick={onToggleSearch}/></form>}
-   {current?<TerminalView key={`${current.id}:${current.runtimeEpoch}:${terminalVersion}`} ref={terminal} session={current} rpc={rpc} connection={connection} hostOnline={!!host?.online} fontSize={fontSize} palette={palette} onSession={onSession} onError={onError}/>:<div className="workspace-empty"><Icon name="terminal"/><h2>{hasProjects?'选择一个会话，继续工作。':'从一个项目开始。'}</h2><p>{hasProjects?'从左侧选择一个会话，即可继续查看并操作终端。':hasHosts?'点击左侧 Projects 旁的“添加项目”，创建第一个项目。':'在设置中配对你的执行主机。'}</p>{!hasProjects&&hasHosts&&<button className="primary" onClick={onAddProject}>添加第一个项目</button>}{!hasHosts&&<button className="primary" onClick={onConnectHost}>连接执行主机</button>}</div>}
+   {current&&current.runtimeOffset>0?<TerminalView key={`${current.id}:${current.runtimeOffset}:${terminalVersion}`} ref={terminal} session={current} rpc={rpc} connection={connection} hostOnline={!!host?.online} fontSize={fontSize} palette={palette} onSession={onSession} onError={onError}/>:<div className="workspace-empty"><Icon name="terminal"/><h2>{current?'Agent 未能启动。':hasProjects?'选择一个会话，继续工作。':'从一个项目开始。'}</h2><p>{current?current.warning||'该会话尚未创建可读取的终端运行。':hasProjects?'从左侧选择一个会话，即可继续查看并操作终端。':hasHosts?'点击左侧 Projects 旁的“添加项目”，创建第一个项目。':'在设置中配对你的执行主机。'}</p>{!current&&!hasProjects&&hasHosts&&<button className="primary" onClick={onAddProject}>添加第一个项目</button>}{!current&&!hasHosts&&<button className="primary" onClick={onConnectHost}>连接执行主机</button>}</div>}
   </section>
-  {details&&current&&<SessionDetails session={current} project={project} host={host} canUse={canUse} busy={busy} clientId={rpc.clientId} onClose={onToggleDetails} onClaim={onClaim} onInterrupt={onInterrupt} onRename={onRename} onHistory={onHistory} onResume={onResume} onArchive={onArchive} onTerminate={onTerminate}/>} 
+  {details&&current&&<SessionDetails session={current} project={project} host={host} canUse={canUse} busy={busy} channelId={rpc.channelId(current.hostId)} onClose={onToggleDetails} onClaim={onClaim} onInterrupt={onInterrupt} onRename={onRename} onHistory={onHistory} onResume={onResume} onArchive={onArchive} onTerminate={onTerminate} onRecover={onRecover} onDelete={onDelete}/>}
  </section>;
 }

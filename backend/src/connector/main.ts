@@ -1,8 +1,8 @@
 import WebSocket from 'ws';
 import {join} from 'node:path';
-import {loadConfig} from '../host/config.js';
+import {loadConnectorConfig} from '../host/config.js';
 import {forwardBounded} from '../shared/transport.js';
-const config=await loadConfig();let stopped=false,delay=500,timer:NodeJS.Timeout|undefined;let local:WebSocket|undefined,remote:WebSocket|undefined;
+const config=await loadConnectorConfig();let stopped=false,delay=500,timer:NodeJS.Timeout|undefined;let local:WebSocket|undefined,remote:WebSocket|undefined;
 function connect(){
  if(stopped)return;
  local=new WebSocket('ws+unix://'+join(config.dataDir!,'host.sock')+':/ipc',{headers:{authorization:'Bearer '+config.ipcToken},maxPayload:8*1024*1024});

@@ -7,8 +7,8 @@ import {hostname} from 'node:os';
 import {writePrivateJson} from './host/config.js';
 const backend=fileURLToPath(new URL('../',import.meta.url)),dir=join(backend,'.data');mkdirSync(dir,{recursive:true,mode:0o700});
 const hostPath=join(dir,'host.json'),secretPath=join(dir,'development.json');
-if(!existsSync(hostPath))writePrivateJson(hostPath,{hostId:randomUUID(),accountId:'dev-local',hostToken:randomBytes(32).toString('hex'),ipcToken:randomBytes(32).toString('hex'),relayUrl:'ws://127.0.0.1:3001/ws/host',name:hostname(),roots:[resolve(backend,'..')],dataDir:dir});
-const host=JSON.parse(readFileSync(hostPath,'utf8'));if(host.accountId!=='dev-local'||!host.hostToken)throw new Error('现有配置不是开发主机；请分别启动正式 host、connector 与 relay');
+if(!existsSync(hostPath))writePrivateJson(hostPath,{hostId:randomUUID(),accountId:'dev-local',hostToken:randomBytes(32).toString('hex'),masterKey:randomBytes(32).toString('base64url'),ipcToken:randomBytes(32).toString('hex'),relayUrl:'ws://127.0.0.1:3001/ws/host',name:hostname(),roots:[resolve(backend,'..')],dataDir:dir});
+const host=JSON.parse(readFileSync(hostPath,'utf8'));if(host.accountId!=='dev-local'||!host.hostToken)throw new Error('现有配置不是开发主机；请分别启动正式 host、connector 与 relay');if(!host.masterKey){host.masterKey=randomBytes(32).toString('base64url');host.masterKeyMigration='hostToken-v1';writePrivateJson(hostPath,host)}
 if(!existsSync(secretPath))writePrivateJson(secretPath,{relaySessionSecret:randomBytes(32).toString('hex')});
 const secret=JSON.parse(readFileSync(secretPath,'utf8'));const env={...process.env,HOST_CONFIG:hostPath};
 const pidPath=join(dir,'host.pid');let hostRunning=false;if(existsSync(pidPath)){try{process.kill(Number(readFileSync(pidPath,'utf8')),0);hostRunning=true;}catch{}}

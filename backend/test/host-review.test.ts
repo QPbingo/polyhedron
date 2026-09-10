@@ -17,7 +17,7 @@ async function call(m:HostManager,c:HostConfig,method:string,params:Record<strin
 }
 function setup(){
   const dir=realpathSync(mkdtempSync(join(tmpdir(),'poly-host-review-'))),root=join(dir,'root');mkdirSync(root);
-  const config:HostConfig={hostId:'review-host',accountId:'review-account',hostToken:'review-secret-with-adequate-length',ipcToken:'ipc-secret',relayUrl:'ws://127.0.0.1:3001/ws/host',name:'Review',roots:[root],dataDir:join(dir,'data')};return {dir,root,config};
+  const config:HostConfig={hostId:'review-host',accountId:'review-account',hostToken:'review-secret-with-adequate-length',masterKey:'review-master-never-relayed-with-length',ipcToken:'ipc-secret',relayUrl:'ws://127.0.0.1:3001/ws/host',name:'Review',roots:[root],dataDir:join(dir,'data')};return {dir,root,config};
 }
 async function until(fn:()=>boolean){const end=Date.now()+5000;while(!fn()){if(Date.now()>end)throw Error('Timed out');await new Promise(r=>setTimeout(r,20));}}
 
@@ -31,6 +31,17 @@ test('snapshot restoration survives ESC restarting an incomplete CSI across PTY 
     assert.equal(replica.term.buffer.active.getLine(0)?.translateToString(true),live.term.buffer.active.getLine(0)?.translateToString(true));
     assert.equal(replica.term.buffer.active.getLine(0)?.getCell(0)?.getFgColor(),live.term.buffer.active.getLine(0)?.getCell(0)?.getFgColor());
   } finally { live.close(); replica.close(); }
+});
+
+test('live attach never labels partially parsed terminal text with an older offset',async()=>{
+  const {dir,root,config}=setup();
+  const manager=new HostManager(config,{detect:async()=>[],launch:async()=>({file:process.execPath,args:['-e',"process.stdout.write('hello\\x1b[');setInterval(()=>{},1000)"],env:{}})});
+  try{
+    const project=await call(manager,config,'addProject',{name:'Review',path:root}),session=await call(manager,config,'createSession',{projectId:project.id,title:'Partial',agent:'codex'});
+    await until(()=>manager.store.journal.eventsAfter(`session:${session.id}`,0).some(event=>event.kind==='pty_output'&&String((event.payload as any)?.data).includes('hello')));
+    const snapshot=await call(manager,config,'attach',{sessionId:session.id,lastAppliedOffset:0});
+    assert.doesNotMatch(snapshot.data,/hello/);assert.ok(snapshot.events.some((event:any)=>event.kind==='pty_output'&&event.data.includes('hello')));assert.ok(snapshot.baseOffset<snapshot.headOffset);
+  }finally{await manager.close();rmSync(dir,{recursive:true,force:true})}
 });
 
 test('approval without tool ID only clears on matching tool name or authoritative Stop',async()=>{
@@ -90,8 +101,8 @@ test('history remains available when the legacy quota is smaller than the journa
   const {HostStore}=await import('../src/host/store.js');
   const store=new HostStore(config.dataDir!,1,30);
   try {
-    store.append({id:'history-session',runtimeEpoch:'old-runtime'} as any,1,'older terminal output');
-    const history=store.history('history-session','old-runtime');
+    store.journal.appendFact({streamId:'session:history-session',kind:'pty_output',runtimeOffset:1,payload:{data:'older terminal output'}});
+    const history=store.history('history-session',1);
     assert.equal(history.entries[0].data,'older terminal output');
     assert.equal(history.truncated,false);
   } finally {store.close();rmSync(dir,{recursive:true,force:true});}

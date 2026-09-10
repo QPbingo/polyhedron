@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import WebSocket from 'ws';
 import { jwtVerify } from 'jose';
-import {encodeFrame,decodeFrame} from '../src/shared/wire.js';
+import {decodeFrame} from '../src/shared/wire.js';
 import { createRelay } from '../src/relay/app.js';
 
 const origin = 'http://127.0.0.1:5173';
@@ -18,6 +18,9 @@ function headers(login:any) { return {cookie:login.cookie,origin,'x-csrf-token':
 async function open(url:string,options:any={}) { const ws=new WebSocket(url,options); await once(ws,'open'); return ws; }
 function next(ws:WebSocket,predicate:(x:any)=>boolean=()=>true):Promise<any> {
   return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{cleanup();reject(new Error('message timeout'))},3000); const onMessage=(data:any)=>{const x=decodeFrame(data);if(predicate(x)){cleanup();resolve(x)}}; const cleanup=()=>{clearTimeout(timer);ws.off('message',onMessage)};ws.on('message',onMessage)});
+}
+async function establish(host:WebSocket,browser:WebSocket,hostId:string,clientId:string,channelId=randomUUID()){
+  const opening=next(host,message=>message.type==='channel_open'),received=next(browser,message=>message.type==='channel_opened');browser.send(JSON.stringify({type:'open_channel',id:`open-${channelId}`,hostId,channelId,clientPublicKey:'A'.repeat(87)}));const request=await opening;host.send(JSON.stringify({type:'channel_opened',requestId:request.requestId,clientId,channelId,hello:{v:1}}));await received;return {channelId,request};
 }
 
 test('development authentication is explicit and loopback only',async()=>{
@@ -72,7 +75,7 @@ test('expired pairing cannot be approved',async()=>{
   try {const me=await login(app);const p=(await app.inject({method:'POST',url:'/api/pairings/start',payload:{name:'Mac'}})).json();await new Promise(r=>setTimeout(r,20));assert.equal((await app.inject({method:'POST',url:'/api/pairings/approve',headers:headers(me),payload:{code:p.code}})).statusCode,410)}finally{await app.close()}
 });
 
-test('websocket RPC is bound to account and tab, logout sends detach and closes browser',async()=>{
+test('encrypted channel grant is bound to account and tab; logout closes the channel',async()=>{
   const app=await createRelay(config);const sockets:WebSocket[]=[];
   try {
     const alice=await login(app,'alice'),bob=await login(app,'bob');
@@ -81,13 +84,10 @@ test('websocket RPC is bound to account and tab, logout sends detach and closes 
     const host=await open(`${wsUrl}/ws/host`,{headers:{authorization:'Bearer host-secret-abcdefghijklmnopqrstuvwxyz123456','x-host-id':'host-one'}});sockets.push(host);
     const clientId=randomUUID();const browser=await open(`${wsUrl}/ws/browser?clientId=${clientId}`,{headers:headers(alice)});sockets.push(browser);
     const foreign=await open(`${wsUrl}/ws/browser?clientId=${randomUUID()}`,{headers:headers(bob)});sockets.push(foreign);
-    const denied=next(foreign,x=>x.type==='response');foreign.send(JSON.stringify({type:'request',id:'deny',hostId:'host-one',method:'list',params:{}}));assert.equal((await denied).error.code,'HOST_NOT_FOUND');
-    const outbound=next(host,x=>x.type==='rpc');browser.send(JSON.stringify({type:'request',id:'mine',hostId:'host-one',method:'attach',clientId:'spoofed',params:{sessionId:'session-one'}}));
-    const rpc=await outbound;assert.equal(rpc.clientId,clientId);
-    const {payload}=await jwtVerify(rpc.grant,new TextEncoder().encode('host-secret-abcdefghijklmnopqrstuvwxyz123456'));
-    assert.equal(payload.sub,alice.user.id);assert.equal(payload.hostId,'host-one');assert.equal(payload.clientId,clientId);assert.equal(payload.scope,'host');assert.ok(Number(payload.exp)-Date.now()/1000<=30);
-    const response=next(browser,x=>x.id==='mine');host.send(JSON.stringify({type:'result',requestId:rpc.requestId,result:{seq:0}}));assert.equal((await response).result.seq,0);
-    const detached=next(host,x=>x.type==='rpc'&&x.method==='detach');const closed=once(browser,'close');
+    const denied=next(foreign,x=>x.type==='response');foreign.send(JSON.stringify({type:'open_channel',id:'deny',hostId:'host-one',channelId:randomUUID(),clientPublicKey:'A'.repeat(87)}));assert.equal((await denied).error.code,'HOST_NOT_FOUND');
+    const opened=await establish(host,browser,'host-one',clientId);assert.equal(opened.request.clientId,clientId);const {payload}=await jwtVerify(opened.request.grant,new TextEncoder().encode('host-secret-abcdefghijklmnopqrstuvwxyz123456'));
+    assert.equal(payload.sub,alice.user.id);assert.equal(payload.aud,'polyhedron-host:host-one');assert.equal(payload.hostId,'host-one');assert.equal(payload.clientId,clientId);assert.equal(payload.clientInstanceId,clientId);assert.match(String(payload.deviceId),/^[0-9a-f]{64}$/);assert.equal(payload.scope,'channel');assert.equal(payload.channelId,opened.channelId);assert.ok(Number(payload.exp)-Date.now()/1000<=30);
+    const detached=next(host,x=>x.type==='channel_close'&&x.channelId===opened.channelId),closed=once(browser,'close');
     await app.inject({method:'POST',url:'/auth/logout',headers:headers(alice)});
     assert.equal((await detached).clientId,clientId);await closed;
     assert.equal((await app.inject({url:'/api/auth',headers:{cookie:alice.cookie}})).json().authenticated,false);
@@ -95,7 +95,7 @@ test('websocket RPC is bound to account and tab, logout sends detach and closes 
 });
 
 
-test('only subscribed owner tab receives output, snapshot and resync; foreign targets are discarded',async()=>{
+test('only the channel owner receives opaque Host events; foreign targets are discarded',async()=>{
   const app=await createRelay(config);const sockets:WebSocket[]=[];
   try {
     const alice=await login(app,'alice'),bob=await login(app,'bob');
@@ -107,16 +107,10 @@ test('only subscribed owner tab receives output, snapshot and resync; foreign ta
     const owner=await open(`${url}/ws/browser?clientId=${clientId}`,{headers:headers(alice)});sockets.push(owner);
     const observer=await open(`${url}/ws/browser?clientId=${observerId}`,{headers:headers(alice)});sockets.push(observer);
     const foreign=await open(`${url}/ws/browser?clientId=${foreignId}`,{headers:headers(bob)});sockets.push(foreign);
-    const denied:any[]=[],seen:any[]=[];observer.on('message',data=>denied.push(decodeFrame(data)));foreign.on('message',data=>denied.push(decodeFrame(data)));
-    const request=next(host);owner.send(JSON.stringify({type:'request',id:'attach',hostId:'output-host',method:'attach',params:{sessionId:'s1'}}));
-    const rpc=await request,response=next(owner,x=>x.type==='response');host.send(JSON.stringify({type:'result',requestId:rpc.requestId,result:{seq:0}}));await response;
-    owner.on('message',data=>seen.push(decodeFrame(data)));
-    const event={type:'event',event:'output',hostId:'output-host',sessionId:'s1',clientId,runtimeEpoch:'run1',seq:1,data:'private terminal'};
-    host.send(encodeFrame({...event,clientId:foreignId}));host.send(encodeFrame({...event,clientId:observerId}));host.send(encodeFrame({...event,sessionId:'unsubscribed'}));host.send(encodeFrame({...event,hostId:'other-host'}));host.send(encodeFrame({...event,clientId:undefined}));
-    const output=next(owner,x=>x.event==='output');host.send(encodeFrame(event));assert.equal((await output).data,'private terminal');
-    const snapshot=next(owner,x=>x.event==='snapshot');host.send(encodeFrame({...event,event:'snapshot',seq:2,data:'x'.repeat(3*1024*1024)}));assert.equal((await snapshot).data.length,3*1024*1024);
-    const resync=next(owner,x=>x.event==='resync');host.send(encodeFrame({...event,event:'resync',message:'resync'}));assert.equal((await resync).message,'resync');
-    assert.equal(denied.length,0);assert.deepEqual(seen.map(e=>e.event),['output','snapshot','resync']);
+    const opened=await establish(host,owner,'output-host',clientId),denied:any[]=[];observer.on('message',data=>denied.push(decodeFrame(data)));foreign.on('message',data=>denied.push(decodeFrame(data)));
+    for(const invalid of [{clientId:foreignId,channelId:opened.channelId},{clientId:observerId,channelId:opened.channelId},{clientId,channelId:randomUUID()}])host.send(JSON.stringify({type:'sealed_event',...invalid,cipher:{v:1,nonce:1,ciphertext:'WRONG_TARGET'}}));
+    const output=next(owner,x=>x.type==='sealed_event');host.send(JSON.stringify({type:'sealed_event',clientId,channelId:opened.channelId,cipher:{v:1,nonce:1,ciphertext:'OPAQUE_TERMINAL'}}));assert.equal((await output).cipher.ciphertext,'OPAQUE_TERMINAL');
+    await new Promise(resolve=>setTimeout(resolve,30));assert.equal(denied.length,0);
   }finally{for(const ws of sockets)ws.terminate();await app.close();}
 });
 
@@ -128,8 +122,7 @@ test('revoked host token cannot reconnect and connected host is closed',async()=
     const url=(await app.listen({host:'127.0.0.1',port:0})).replace('http','ws');
     host=await open(`${url}/ws/host`,{headers:{authorization:`Bearer ${token}`,'x-host-id':'h'}});
     const clientId=randomUUID();browser=await open(`${url}/ws/browser?clientId=${clientId}`,{headers:headers(me)});
-    const attachment=next(host);browser.send(JSON.stringify({type:'request',id:'attach',hostId:'h',method:'attach',params:{sessionId:'s'}}));const rpc=await attachment;const response=next(browser,x=>x.type==='response');host.send(JSON.stringify({type:'result',requestId:rpc.requestId,result:{seq:0}}));await response;
-    const detach=next(host,x=>x.method==='detach');
+    const opened=await establish(host,browser,'h',clientId),detach=next(host,x=>x.type==='channel_close'&&x.channelId===opened.channelId);
     const closed=once(host,'close');assert.equal((await app.inject({method:'POST',url:'/api/hosts/h/revoke',headers:headers(me)})).statusCode,200);assert.equal((await detach).clientId,clientId);await closed;
     await assert.rejects(open(`${url}/ws/host`,{headers:{authorization:`Bearer ${token}`,'x-host-id':'h'}}),/401/);
   }finally{host?.terminate();browser?.terminate();await app.close();}
@@ -146,7 +139,7 @@ test('browser websocket rejects missing cookie, foreign Origin and reuse of anot
   }finally{owner?.terminate();await app.close();}
 });
 
-test('authorization renews attached clients within ten seconds and persisted revocation detaches them',async()=>{
+test('channel authorization renews within ten seconds and persisted revocation closes it',async()=>{
   const app=await createRelay(config);const sockets:WebSocket[]=[];
   try{
     const me=await login(app),hostToken='renewal-host-secret-abcdefghijklmnopqrstuvwxyz';
@@ -154,15 +147,13 @@ test('authorization renews attached clients within ten seconds and persisted rev
     const url=(await app.listen({host:'127.0.0.1',port:0})).replace('http','ws');
     const host=await open(`${url}/ws/host`,{headers:{authorization:`Bearer ${hostToken}`,'x-host-id':'renew-host'}});sockets.push(host);
     const clientId=randomUUID(),browser=await open(`${url}/ws/browser?clientId=${clientId}`,{headers:headers(me)});sockets.push(browser);
-    const attach=next(host);browser.send(JSON.stringify({type:'request',id:'attach',hostId:'renew-host',method:'attach',params:{sessionId:'s'}}));
-    const rpc=await attach,response=next(browser,x=>x.id==='attach');host.send(JSON.stringify({type:'result',requestId:rpc.requestId,result:{seq:0}}));await response;
-    const renewed=new Promise<any>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Authorization was not renewed within its ten-second window')),11_000);host.on('message',data=>{const msg=decodeFrame(data);if(msg.method==='authorize'){clearTimeout(timer);resolve(msg);}})});
-    const renewal=await renewed;const {payload}=await jwtVerify(renewal.grant,new TextEncoder().encode(hostToken));assert.equal(payload.clientId,clientId);assert.equal(payload.method,'authorize');
-    host.send(JSON.stringify({type:'result',requestId:renewal.requestId,result:{ok:true}}));
+    const opened=await establish(host,browser,'renew-host',clientId);
+    const renewed=new Promise<any>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Authorization was not renewed within its ten-second window')),11_000);host.on('message',data=>{const msg=decodeFrame(data);if(msg.type==='channel_renew'){clearTimeout(timer);resolve(msg);}})});
+    const renewal=await renewed;const {payload}=await jwtVerify(renewal.grant,new TextEncoder().encode(hostToken));assert.equal(payload.clientId,clientId);assert.equal(payload.channelId,opened.channelId);
     const token=me.cookie.split('=')[1],session=await app.relayStore.getSession(token);assert.ok(session);await app.relayStore.revokeSession(session.hash);
-    const detach=next(host,x=>x.method==='detach'),closed=once(browser,'close');
+    const detach=next(host,x=>x.type==='channel_close'&&x.channelId===opened.channelId),closed=once(browser,'close');
     // The next RPC checks durable revocation immediately; the renewal timer also checks it.
-    browser.send(JSON.stringify({type:'request',id:'after-revoke',hostId:'renew-host',method:'input',params:{sessionId:'s',data:'must never run'}}));
+    browser.send(JSON.stringify({type:'sealed',id:'after-revoke',hostId:'renew-host',channelId:opened.channelId,cipher:{v:1,nonce:1,ciphertext:'must-never-run'}}));
     assert.equal((await detach).clientId,clientId);await closed;
   }finally{for(const ws of sockets)ws.terminate();await app.close();}
 });
@@ -174,12 +165,23 @@ test('a browser cannot queue more than 64 host requests while the host is stalle
     await app.relayStore.upsertHost({id:'bounded-host',accountId:me.user.id,name:'Mac',hostToken});
     const url=(await app.listen({host:'127.0.0.1',port:0})).replace('http','ws');
     const host=await open(`${url}/ws/host`,{headers:{authorization:`Bearer ${hostToken}`,'x-host-id':'bounded-host'}});sockets.push(host);
-    const browser=await open(`${url}/ws/browser?clientId=${randomUUID()}`,{headers:headers(me)});sockets.push(browser);
+    const clientId=randomUUID(),browser=await open(`${url}/ws/browser?clientId=${clientId}`,{headers:headers(me)});sockets.push(browser);const opened=await establish(host,browser,'bounded-host',clientId);
     const forwarded:any[]=[],responses:any[]=[];host.on('message',data=>forwarded.push(decodeFrame(data)));browser.on('message',data=>responses.push(decodeFrame(data)));
-    for(let i=0;i<80;i++)browser.send(JSON.stringify({type:'request',id:String(i),hostId:'bounded-host',method:'list',params:{}}));
+    for(let i=0;i<80;i++)browser.send(JSON.stringify({type:'sealed',id:String(i),hostId:'bounded-host',channelId:opened.channelId,cipher:{v:1,nonce:i+1,ciphertext:'OPAQUE'}}));
     await new Promise(resolve=>setTimeout(resolve,150));
     assert.ok(forwarded.length<=64,`${forwarded.length} requests forwarded while host stalled`);
     assert.ok(responses.filter(r=>r.error?.code==='BUSY').length>=16);
+  }finally{for(const ws of sockets)ws.terminate();await app.close();}
+});
+
+test('a browser is limited to 16 active or opening encrypted channels',async()=>{
+  const app=await createRelay({...config,rpcTimeoutMs:1000});const sockets:WebSocket[]=[];
+  try{
+    const me=await login(app),hostToken='channel-limit-host-secret-abcdefghijklmnopqrstuvwxyz';
+    await app.relayStore.upsertHost({id:'channel-limit-host',accountId:me.user.id,name:'Mac',hostToken});
+    const url=(await app.listen({host:'127.0.0.1',port:0})).replace('http','ws'),host=await open(`${url}/ws/host`,{headers:{authorization:`Bearer ${hostToken}`,'x-host-id':'channel-limit-host'}});sockets.push(host);
+    const clientId=randomUUID(),browser=await open(`${url}/ws/browser?clientId=${clientId}`,{headers:headers(me)});sockets.push(browser);
+    const denied=next(browser,message=>message.type==='response'&&message.error?.code==='CHANNEL_LIMIT');for(let index=0;index<17;index++)browser.send(JSON.stringify({type:'open_channel',id:`channel-${index}`,hostId:'channel-limit-host',channelId:randomUUID(),clientPublicKey:'A'.repeat(87)}));assert.equal((await denied).error.code,'CHANNEL_LIMIT');
   }finally{for(const ws of sockets)ws.terminate();await app.close();}
 });
 
@@ -218,15 +220,31 @@ test('revoking another browser login detaches every tab and preserves the reques
     const host=await open(`${url}/ws/host`,{headers:{authorization:`Bearer ${hostToken}`,'x-host-id':'browser-host'}});sockets.push(host);
     const clients=[randomUUID(),randomUUID()];
     const tabs:WebSocket[]=[];
-    for(const clientId of clients){const tab=await open(`${url}/ws/browser?clientId=${clientId}`,{headers:headers(target)});sockets.push(tab);tabs.push(tab);const sent=next(host,x=>x.method==='attach');tab.send(JSON.stringify({type:'request',id:'attach',hostId:'browser-host',method:'attach',params:{sessionId:'s'}}));const request=await sent;const received=next(tab,x=>x.id==='attach');host.send(JSON.stringify({type:'result',requestId:request.requestId,result:{seq:0}}));await received;}
+    const channelIds:string[]=[];for(const clientId of clients){const tab=await open(`${url}/ws/browser?clientId=${clientId}`,{headers:headers(target)});sockets.push(tab);tabs.push(tab);channelIds.push((await establish(host,tab,'browser-host',clientId)).channelId)}
     const requester=await open(`${url}/ws/browser?clientId=${randomUUID()}`,{headers:headers(admin)});sockets.push(requester);
-    const detached=new Promise<string[]>((resolve,reject)=>{const ids:string[]=[];const timer=setTimeout(()=>reject(new Error('Both revoked tabs must detach')),3000);host.on('message',data=>{const message=decodeFrame(data);if(message.method==='detach'){ids.push(message.clientId);if(ids.length===2){clearTimeout(timer);resolve(ids);}}});});
+    const detached=new Promise<string[]>((resolve,reject)=>{const ids:string[]=[];const timer=setTimeout(()=>reject(new Error('Both revoked tabs must close channels')),3000);host.on('message',data=>{const message=decodeFrame(data);if(message.type==='channel_close'){ids.push(message.clientId);if(ids.length===2){clearTimeout(timer);resolve(ids);}}});});
     const closed=Promise.all(tabs.map(tab=>once(tab,'close')));
     const revoked=await app.inject({method:'POST',url:`/api/browsers/${targetId}/revoke`,headers:headers(admin)});assert.equal(revoked.statusCode,200,revoked.body);
     assert.deepEqual((await detached).sort(),clients.sort());await closed;assert.equal(requester.readyState,WebSocket.OPEN);
     assert.equal((await app.inject({url:'/api/auth',headers:headers(target)})).json().authenticated,false);
     assert.equal((await app.inject({url:'/api/auth',headers:headers(admin)})).json().authenticated,true);
     await assert.rejects(open(`${url}/ws/browser?clientId=${randomUUID()}`,{headers:headers(target)}),/401/);
-    const sent=next(host,x=>x.method==='list');requester.send(JSON.stringify({type:'request',id:'still-authorized',hostId:'browser-host',method:'list',params:{}}));const request=await sent;const received=next(requester,x=>x.id==='still-authorized');host.send(JSON.stringify({type:'result',requestId:request.requestId,result:{ok:true}}));assert.equal((await received).result.ok,true);
+    await establish(host,requester,'browser-host',(new URL(requester.url)).searchParams.get('clientId')!);
+  }finally{for(const socket of sockets)socket.terminate();await app.close();}
+});
+
+test('opaque relay routes only encrypted channel envelopes and never accepts plaintext RPC content',async()=>{
+  const app=await createRelay(config);const sockets:WebSocket[]=[];
+  try{
+    const me=await login(app),hostToken='opaque-host-secret-abcdefghijklmnopqrstuvwxyz';
+    await app.relayStore.upsertHost({id:'opaque-host',accountId:me.user.id,name:'Mac',hostToken});
+    const url=(await app.listen({host:'127.0.0.1',port:0})).replace('http','ws'),host=await open(`${url}/ws/host`,{headers:{authorization:`Bearer ${hostToken}`,'x-host-id':'opaque-host'}});sockets.push(host);
+    const clientId=randomUUID(),browser=await open(`${url}/ws/browser?clientId=${clientId}`,{headers:headers(me)});sockets.push(browser);const channelId=randomUUID();
+    const opening=next(host,x=>x.type==='channel_open');browser.send(JSON.stringify({type:'open_channel',id:'open-1',hostId:'opaque-host',channelId,clientPublicKey:'A'.repeat(87)}));const opened=await opening;
+    assert.equal(opened.clientId,clientId);assert.equal(opened.channelId,channelId);const {payload}=await jwtVerify(opened.grant,new TextEncoder().encode(hostToken));assert.equal(payload.purpose,'channel');assert.equal(payload.channelId,channelId);assert.equal(payload.clientId,clientId);
+    const browserOpened=next(browser,x=>x.type==='channel_opened');host.send(JSON.stringify({type:'channel_opened',requestId:opened.requestId,clientId,channelId,hello:{v:1}}));assert.equal((await browserOpened).id,'open-1');
+    const cipher={v:1,nonce:1,ciphertext:'ENCRYPTED_BASE64URL_ONLY'};const forwarded=next(host,x=>x.type==='sealed');browser.send(JSON.stringify({type:'sealed',id:'sealed-1',hostId:'opaque-host',channelId,cipher}));const sealed=await forwarded;assert.deepEqual(sealed.cipher,cipher);assert.equal(sealed.method,undefined);assert.equal(sealed.params,undefined);
+    const response=next(browser,x=>x.type==='sealed_result');host.send(JSON.stringify({type:'sealed_result',requestId:sealed.requestId,clientId,channelId,cipher:{v:1,nonce:1,ciphertext:'HOST_CIPHERTEXT'}}));assert.equal((await response).cipher.ciphertext,'HOST_CIPHERTEXT');
+    const before=[] as any[];host.on('message',data=>before.push(decodeFrame(data)));const denied=next(browser,x=>x.type==='response'&&x.id==='plaintext');browser.send(JSON.stringify({type:'request',id:'plaintext',hostId:'opaque-host',method:'input',params:{data:'SENTINEL_PROMPT'}}));assert.equal((await denied).error.code,'INVALID_REQUEST');await new Promise(resolve=>setTimeout(resolve,30));assert.equal(before.some(message=>JSON.stringify(message).includes('SENTINEL_PROMPT')),false);
   }finally{for(const socket of sockets)socket.terminate();await app.close();}
 });

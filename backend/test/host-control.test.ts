@@ -9,15 +9,24 @@ import {HostManager} from '../src/host/manager.js';
 import type {HostConfig} from '../src/shared/types.js';
 
 const dirs:string[]=[];test.after(()=>dirs.forEach(dir=>rmSync(dir,{recursive:true,force:true})));
-function setup(){const dir=realpathSync(mkdtempSync(join(tmpdir(),'poly-control-'))),root=join(dir,'root');mkdirSync(root);dirs.push(dir);const config:HostConfig={hostId:'host-a',accountId:'account-a',hostToken:'host-secret-that-is-long-enough-1234',ipcToken:'ipc-secret-that-is-long-enough-1234',relayUrl:'ws://127.0.0.1/ws',name:'Host',roots:[root],dataDir:join(dir,'data')};const manager=new HostManager(config,{detect:async()=>[],launch:async()=>({file:process.execPath,args:['-e',"process.stdin.on('data',d=>process.stdout.write('ACK:'+d));process.stdout.write('READY\\r\\n')"],env:{}})});return {root,config,manager}}
+function setup(){const dir=realpathSync(mkdtempSync(join(tmpdir(),'poly-control-'))),root=join(dir,'root');mkdirSync(root);dirs.push(dir);const config:HostConfig={hostId:'host-a',accountId:'account-a',hostToken:'host-secret-that-is-long-enough-1234',masterKey:'master-secret-that-never-leaves-host-1234',ipcToken:'ipc-secret-that-is-long-enough-1234',relayUrl:'ws://127.0.0.1/ws',name:'Host',roots:[root],dataDir:join(dir,'data')};const manager=new HostManager(config,{detect:async()=>[],launch:async()=>({file:process.execPath,args:['-e',"process.stdin.on('data',d=>process.stdout.write('ACK:'+d));process.stdout.write('READY\\r\\n')"],env:{}})});return {root,config,manager}}
 async function call(manager:HostManager,config:HostConfig,clientId:string,channelId:string,method:string,params:Record<string,unknown>={}){const operationId=typeof params.operationId==='string'?params.operationId:randomUUID(),body={...params,operationId};const grant=await new SignJWT({hostId:config.hostId,clientId,scope:'host',method,sessionId:body.sessionId}).setSubject(config.accountId).setIssuedAt().setExpirationTime('30s').setProtectedHeader({alg:'HS256'}).sign(new TextEncoder().encode(config.hostToken));return manager.rpc({type:'rpc',requestId:randomUUID(),clientId,channelId,method,params:body,grant})}
 async function until(check:()=>boolean){const end=Date.now()+3000;while(!check()){if(Date.now()>end)throw new Error('timeout');await new Promise(resolve=>setTimeout(resolve,20))}}
+
+test('an encrypted channel identifier is single-use for the Host process',async()=>{
+  const {manager}=setup();
+  try{
+    await manager.openChannel('one-use-channel',Date.now()+30_000);await manager.closeChannel('client','one-use-channel');
+    await assert.rejects(manager.openChannel('one-use-channel',Date.now()+30_000),(error:any)=>error.code==='CHANNEL_REPLAY');
+  }finally{await manager.close()}
+});
 
 test('channel-bound control is single-writer and stale authenticated operations are journaled',async()=>{
   const {root,config,manager}=setup();
   try{
     const project=await call(manager,config,'a','a-1','addProject',{name:'P',path:root});const session=await call(manager,config,'a','a-1','createSession',{projectId:project.id,title:'S',agent:'codex'});
-    const firstAttach=await call(manager,config,'a','a-1','attach',{sessionId:session.id,lastAppliedOffset:0});assert.equal(firstAttach.session.controller,null);
+    await until(()=>manager.store.journal.eventsAfter(`session:${session.id}`,0).some(event=>event.kind==='pty_output'&&String((event.payload as any).data).includes('READY')));
+    const firstAttach=await call(manager,config,'a','a-1','attach',{sessionId:session.id,lastAppliedOffset:0});assert.equal(firstAttach.session.controller,null);assert.match(firstAttach.data,/READY/);
     await call(manager,config,'b','b-1','attach',{sessionId:session.id,lastAppliedOffset:0});
     const first=await call(manager,config,'a','a-1','claimControl',{sessionId:session.id,runtimeOffset:session.runtimeOffset});
     const second=await call(manager,config,'b','b-1','claimControl',{sessionId:session.id,runtimeOffset:session.runtimeOffset});
